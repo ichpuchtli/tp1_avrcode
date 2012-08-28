@@ -230,7 +230,8 @@ int main(void) {
 ISR(TIMER0_OVF_vect){
   
     // start_ADC_conversion();
-
+    DDRD = 0xFF;
+    PORTD = ~PORTD;
 }
 
 // 16-bit Timer1, freq = 1Hz
