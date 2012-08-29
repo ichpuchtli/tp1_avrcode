@@ -1,11 +1,7 @@
-#define __AVR_ATmega48P__
-
 #include <avr/io.h>
 #include <avr/interrupt.h>
 
-// Notes
-// PULL-UP resistors open drain?
-// ADC clock speed, adc conversion speed request converison 38hz?
+#include <util/delay.h>
 
 // Inputs
 #define PHOTO_OPT ADC1D
@@ -20,6 +16,12 @@
 #define HIGH 1
 #define LOW  0
 
+/* Time keeping counter */
+static volatile unsigned long ulTickSeconds = 0; 
+
+#define SECONDS (ulTickSeconds)
+#define MINUTES (ulTickSeconds % 60)
+#define HOURS (ulTickSeconds % ( 60 * 60 ) )
 
 void start_ADC_conversion(int channel){
 
@@ -29,13 +31,12 @@ void start_ADC_conversion(int channel){
 
 }
 
-
 // 8bit Timer used to trigger ADC conversions
 void init_timer0(void)
 {
     // Freq = F_CPU / prescaler / 2 * 255 
-    // Freq = 20000000 / 1024 / 512
-    // Freq ~= 38 Hz 
+    // Freq = 8000000 / 1024 / 512
+    // Freq ~= 15 Hz 
     
     // CS02 CS01 CS00  Description
     //  0    0    0    No Clock Source (Timer/Counter stopped)
@@ -72,11 +73,14 @@ void init_timer1(void){
     //  1    1    1    External T1 pin rising edge
  
     // Freq = F_CPU / prescaler / OCR1A
-    // Freq = 20000000 / 1024 / 19531
+    // Freq = 8000000 / 1024 / 6644
     // Freq ~= 1 Hz
-    
-    OCR1AL = (19531U >> 8);
-    OCR1AH = (19531U << 8); 
+   
+    int TIMER1_OCR = F_CPU / 1024;
+
+    OCR1AL = (unsigned char) (TIMER1_OCR);
+    OCR1AH = (unsigned char) (TIMER1_OCR >> 8); 
+
     // Normal Port operation
     TCCR1A = 0x00;
 
@@ -101,8 +105,9 @@ void init_timer2(void){
     // ___|---|___|---|_  -> LED_MATRIX
     
     // Freq = F_CPU / prescaler / 2 * OCR2A
-    // Freq = 20000000 / 1024 / 360
+    // Freq = 8000000 / 1024 / 360
     // Freq ~= 54 Hz 
+    // OCR2A = F_CPU / prescaler / 2 / Freq
     
     // CS22 CS21 CS20  Description
     //  0    0    0    No Clock Source (Timer/Counter stopped)      
@@ -114,7 +119,7 @@ void init_timer2(void){
     //  1    1    0    External T0 pin failing edge
     //  1    1    1    External T0 pin rising edge
     
-    OCR2A = 180;
+    OCR2A = F_CPU / 1024 / 2 / 50;
 
     // Normal port operation and enable CTC reset timer of OCR2A match
     TCCR2A = (1<<WGM21);
@@ -190,8 +195,9 @@ int main(void) {
 
     sei();
 
-    for ( ; ; ) { }
+    DDRD = 0xFF;
 
+    for ( ; ; ) { }
 
     return 0;
 
@@ -226,18 +232,17 @@ int main(void) {
 //#define SPM_READY_vect    _VECTOR(25)  /* Store Program Memory Read */
 
 
-// 8-bit Timer0, freq = 38Hz
+// 8-bit Timer0, freq = 15Hz
 ISR(TIMER0_OVF_vect){
   
     // start_ADC_conversion();
-    DDRD = 0xFF;
-    PORTD = ~PORTD;
 }
 
 // 16-bit Timer1, freq = 1Hz
 ISR(TIMER1_COMPA_vect){
 
-    //seconds++;
+    ulTickSeconds++;
+    PORTD = SECONDS;
 
 }
 
