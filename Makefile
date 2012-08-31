@@ -71,7 +71,8 @@ size: ${TARGET}
 clean:
 	-rm -rf $(OBJECTS) main.elf dep/* main.hex main.eep main.lss main.map
 
-avrdude: $(TARGET)
+flash: 
+	make
 	avrdude -F -e -y -c avrispmkii -p m48 -P usb -U flash:w:main.hex
 
 ## Other dependencies
