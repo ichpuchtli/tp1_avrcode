@@ -22,10 +22,7 @@
         LED_ARRAY_DDR  = LED_ARRAY_MATRIX[A].PIO.DDR;   \
     }while(0)
 
-#define _KILL_LED_ARRAY()    \
-    do {                     \
-        _CTRL_LED_(1);       \
-    }while(0)
+#define _KILL_LED_ARRAY() _CTRL_LED_(0x00)
 
 #define _CTRL_ADC_(CH)                    \
     do {                                  \
@@ -37,9 +34,11 @@
 #define HIGH 1
 #define LOW  0
 
-#define SECONDS     (ulTickSeconds)
-#define MINUTES     (ulTickSeconds % 60)
-#define HOURS       (ulTickSeconds % ( 60 * 60 ) )
+#define __SECONDS__     ( ulTickSeconds % ( 60 * 60 * 24) )
+#define __MINUTES__     (__SECONDS__ / 60)
+#define __HOURS__       (__MINUTES__ / 60)
+#define __IS_PM__       (__HOURS__ >= 12)
+#define __IS_AM__       (__HOURS__ < 12)
 
 typedef union LEDConfig {
     uint16_t wide;
@@ -47,7 +46,7 @@ typedef union LEDConfig {
 } LED;
 
 /* Time keeping counter */
-static volatile unsigned int ulTickSeconds = 0; 
+static volatile uint32_t ulTickSeconds = 0; 
 
 /*
  * PD0 ---------------------- 
@@ -63,8 +62,8 @@ static volatile unsigned int ulTickSeconds = 0;
 
 static const LED LEDArray[30] = {
 
-//  Mask                Off
-    0b0011111100111111, 0b0000000000000000,
+//  Off                 Mask
+    0b0000000000000000, 0b0011111100111111, 
 
 //  DO1                 D02                 D03                 D04
     0b0000001100000001, 0b0000010100000001, 0b0000100100000001, 0b0001000100000001,
@@ -81,6 +80,7 @@ static const LED LEDArray[30] = {
 //  D25                 D26                 D27                 D28
     0b0011000000010000, 0b0010000100100000, 0b0010001000100000, 0b0010010000100000
 };
+
 
 /* | Hour | LED's
  * | 0    | None
@@ -109,11 +109,39 @@ static const LED LEDArray[30] = {
  * | 23   | 1,12
  */
  
+/*static const uint8_t HourLEDMap[24] = {
+    0x00, 0x02, 0x03, 0x04, 0x05, 0x06,
+    0x07, 0x08, 0x09, 0x01, 0x0B, 0x0C,
+    0x01, 0x12, 0x13, 0x14, 0x15, 0x16,
+    0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C
+}; */
+
+// Hour   ->    D0 | D1
+// [0-23]     0bXXXX???? 
+// Use:
+// uint8_t tmp = HourLEDMap(__HOURS__);
+// _CTRL_LED_(0x0F & tmp); 
+// _delay_ms(10);
+// _CTRL_LED_(0xF0 & tmp);
+
+uint8_t HourLEDMap(uint8_t hour){
+
+    uint8_t set = 0x00;
+
+    if( hour == 0x00 ) { return set; }
+
+    set = ( ( hour % 0x0C ) + 0x01 );
+
+    if( hour >= 0x0C ) { set |= 0x10; } 
+    
+    return set;
+
+};
 
 /* Minutes
  * 00      | 13              |  05    | 14                | 10    | 15
  * 01      | 28              |  06    | 14,28             | 11    | 15,28
- * 02      | 27,28           |  07    | 14,27,29          | 12    | 15,27,28
+ * 02      | 27,28           |  07    | 14,27,28          | 12    | 15,27,28
  * 03      | 26,27,28        |  08    | 14,26,27,28       | 13    | 15,26,27,28
  * 04      | 25,26,27,28     |  09    | 14,25,26,27,28    | 14    | 15,25,26,27,28
  *
@@ -135,6 +163,49 @@ static const LED LEDArray[30] = {
  * 48      | 22,26,27,28     |  53    | 23,26,27,28       | 58    | 24,26,27,28
  * 49      | 22,25,26,27,28  |  54    | 23,25,26,27,28    | 59    | 24,25,26,27,28
  */
+
+
+// bit 0 ------------------------ bit 32
+// 00000 00000 00000 00000 00000 xxxxxxx 
+// 0-4   5-9   10-14 15-19 20-24 unused
+// Uses
+//  set = MinuteLEDMap(__MINUTES__);
+//  uint8_t LED,i;
+//  for(i = 0; i < 5; i++){
+//      LED =  (uint8_t) ( set >> ( i * 5 ) ) & 0x1F;
+//      _CTRL_LED_(LED);
+//      _delay_ms(4);
+//  }
+uint32_t MinuteLEDMap(uint8_t minute){
+
+    uint32_t DNumSet = 0x00000000;
+
+    switch( minute % 5 ) {
+
+        case 4: 
+            DNumSet |= 25 << 20;
+            /* fallthrough */
+        case 3: 
+            DNumSet |= 26 << 15;
+            /* fallthrough */
+        case 2: 
+            DNumSet |= 27 << 10;
+            /* fallthrough */
+        case 1: 
+            DNumSet |= 28 << 5;
+            /* fallthrough */
+        case 0: 
+            if(minute == 0 || minute > 4){
+                DNumSet |= (13 + minute/5);
+            }
+            break;
+
+    }
+
+    return DNumSet;
+
+}
+
 
 // 8bit Timer used to trigger ADC conversions
 void init_timer0(void)
@@ -286,9 +357,10 @@ void init_ADC(void){
     DIDR0 = (1<<ADC5D)|(1<<ADC4D)|(1<<ADC3D)|(1<<ADC2D)|(1<<ADC1D)|(1<<ADC0D);
 }
 
-
 int main(void) {
 
+    int i = 0;
+    i = sizeof(uint32_t);
 
     init_timer0();
     init_timer1();
@@ -298,7 +370,7 @@ int main(void) {
 
     sei();
 
-    for ( ; ; ) { }
+    for ( ;i; ) { }
 
     return 0;
 
@@ -362,3 +434,11 @@ ISR(ADC_vect) {
     uint8_t value = ADCH;
 
 }
+
+
+ISR(USART_RX_vect){
+    
+    //uint8_t byte = UDR;
+
+}
+
