@@ -9,44 +9,60 @@
 
 #include <util/delay.h>
 
+#define LED_CLK_PORT                PORTD
+#define LED_CLK_DDR                 DDRD
 
-#define LED_ARRAY_MATRIX    LEDArray
+#define HOUR_SET_SIZE               2
+#define MINUTE_SET_SIZE             5
+#define MISC_SET_SIZE               0
 
-#define LED_ARRAY_PORT      PORTD
-#define LED_ARRAY_DDR       DDRD
+#define LED_CLK_SET_SIZE (HOUR_SET_SIZE + MINUTE_SET_SIZE + MISC_SET_SIZE ) 
 
+#define CHARLIE_MAP_SIZE            30
 
 #define _CTRL_LED_(A)                                   \
     do {                                                \
-        LED_ARRAY_PORT = LED_ARRAY_MATRIX[A].PIO.PORT;  \
-        LED_ARRAY_DDR  = LED_ARRAY_MATRIX[A].PIO.DDR;   \
+        LED_CLK_PORT = CHARLIE_MAP[A].PIO.PORT;         \
+        LED_CLK_DDR  = CHARLIE_MAP[A].PIO.DDR;          \
     }while(0)
 
-#define _KILL_LED_ARRAY() _CTRL_LED_(0x00)
-
-#define _CTRL_ADC_(CH)                    \
-    do {                                  \
-        ADMUX  &= 0xF0;                   \
-        ADMUX  |= ( channel & 0x0F );     \
-        ADCSRA |= ( 1 << ADSC );          \
+#define _SIGNAL_ADC_(CH)                    \
+    do {                                    \
+        ADMUX  &= 0xF0;                     \
+        ADMUX  |= ( channel & 0x0F );       \
+        ADCSRA |= ( 1 << ADSC );            \
     }while(0)
 
-#define HIGH 1
-#define LOW  0
+#define _MEM_ZERO_(BUFF,SIZE)                     \
+    do {                                          \
+        for(uint16_t i = 0; i < SIZE; i++){       \
+            BUFF[i] = 0;                          \
+        }                                         \
+    }while(0)
 
-#define __SECONDS__     ( ulTickSeconds % ( 60 * 60 * 24) )
-#define __MINUTES__     (__SECONDS__ / 60)
-#define __HOURS__       (__MINUTES__ / 60)
-#define __IS_PM__       (__HOURS__ >= 12)
-#define __IS_AM__       (__HOURS__ < 12)
 
-typedef union LEDConfig {
+#define __SECONDS__     ( TICKS_SECONDS % ( 60 * 60 * 12) ) // modulo 43200
+#define __MINUTES__     (__SECONDS__ / 60) 
+#define __HOURS__       (__MINUTES__ / 60) 
+
+
+union TriStateConfig {
+
     uint16_t wide;
     struct { uint8_t DDR; uint8_t PORT; } PIO;
-} LED;
+
+};
 
 /* Time keeping counter */
-static volatile uint32_t ulTickSeconds = 0; 
+static volatile uint32_t TICKS_SECONDS = 0; 
+
+/* Set of current LED configurations */
+static volatile uint8_t LED_CLK_SET[LED_CLK_SET_SIZE] = {0};
+
+/* Current index into LED_CLK_SET */
+static volatile uint8_t LED_CLK_SET_INDEX = 0;
+
+static volatile uint8_t IS_PM = 1;
 
 /*
  * PD0 ---------------------- 
@@ -60,7 +76,7 @@ static volatile uint32_t ulTickSeconds = 0;
  * PD2 ---------------------- 
  */
 
-static const LED LEDArray[30] = {
+static const union TriStateConfig CHARLIE_MAP[CHARLIE_MAP_SIZE] = {
 
 //  Off                 Mask
     0b0000000000000000, 0b0011111100111111, 
@@ -116,25 +132,20 @@ static const LED LEDArray[30] = {
     0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C
 }; */
 
-// Hour   ->    D0 | D1
-// [0-23]     0bXXXX???? 
-// Use:
-// uint8_t tmp = HourLEDMap(__HOURS__);
-// _CTRL_LED_(0x0F & tmp); 
-// _delay_ms(10);
-// _CTRL_LED_(0xF0 & tmp);
+// Hour   ->   D0 | D1
+// [0-23]     0xXX?? 
+void UpdateHourSet(uint8_t hour, volatile uint8_t* LEDSet){
 
-uint8_t HourLEDMap(uint8_t hour){
+    _MEM_ZERO_(LEDSet,HOUR_SET_SIZE);
 
-    uint8_t set = 0x00;
+    if( hour == 0x00 ){ return; }
 
-    if( hour == 0x00 ) { return set; }
+    if( hour >= 12 ) {
+        
+        LEDSet[1] = 1;
+    }
 
-    set = ( ( hour % 0x0C ) + 0x01 );
-
-    if( hour >= 0x0C ) { set |= 0x10; } 
-    
-    return set;
+    LEDSet[0] = ( hour % 12 ) + 1 ; 
 
 };
 
@@ -165,47 +176,37 @@ uint8_t HourLEDMap(uint8_t hour){
  */
 
 
-// bit 0 ------------------------ bit 32
-// 00000 00000 00000 00000 00000 xxxxxxx 
-// 0-4   5-9   10-14 15-19 20-24 unused
-// Uses
-//  set = MinuteLEDMap(__MINUTES__);
-//  uint8_t LED,i;
-//  for(i = 0; i < 5; i++){
-//      LED =  (uint8_t) ( set >> ( i * 5 ) ) & 0x1F;
-//      _CTRL_LED_(LED);
-//      _delay_ms(4);
-//  }
-uint32_t MinuteLEDMap(uint8_t minute){
+void UpdateMinuteSet(uint8_t minute, volatile uint8_t* LEDSet){
 
-    uint32_t DNumSet = 0x00000000;
+    _MEM_ZERO_(LEDSet, MINUTE_SET_SIZE);
 
     switch( minute % 5 ) {
 
         case 4: 
-            DNumSet |= 25 << 20;
+            LEDSet[0] = 25;
             /* fallthrough */
         case 3: 
-            DNumSet |= 26 << 15;
+            LEDSet[1] = 26;
             /* fallthrough */
         case 2: 
-            DNumSet |= 27 << 10;
+            LEDSet[2] = 27;
             /* fallthrough */
         case 1: 
-            DNumSet |= 28 << 5;
+            LEDSet[3] = 28;
             /* fallthrough */
         case 0: 
-            if(minute == 0 || minute > 4){
-                DNumSet |= (13 + minute/5);
+            if( minute == 0 || minute > 4) {
+                LEDSet[4] = ( 13 + minute / 5 );
             }
-            break;
-
     }
-
-    return DNumSet;
-
 }
 
+void init_clock_face(void){
+
+    //UpdateMinuteSet(__MINUTES__ % 60, LED_CLK_SET);
+    //UpdateHourSet(__HOURS__ % 12, &LED_CLK_SET[MINUTE_SET_SIZE]);
+
+}
 
 // 8bit Timer used to trigger ADC conversions
 void init_timer0(void)
@@ -264,24 +265,13 @@ void init_timer1(void){
 
 }
 
-// 8-bit timer used for pwm of leds
+// 8-bit timer used to switch TriState PIO for charlieplexing
 void init_timer2(void){
 
-    // OCR2A
-    //   /|  /|  /|  /|
-    //  / | / | / | / |
-    // /  |/  |/  |/  |
-    //
-    // ___|---|___|---|_  -> LED_MATRIX
-    
     // Freq = F_CPU / prescaler / 2 * OCR2A
-    // Freq ~= 50 Hz 
-    // OCR2A ~= F_CPU / prescaler / 50 / 2 
-    // OCR2A ~= 195 but actuall clk speed less than F_CPU at room temp so use
-    // OCR2A = 160 
+    // OCR2A = F_CPU / prescaler / Freq / 2 
     
-    // This setup is the same as TCCR2A = 0; TIMSK2 = (1<<TOIE2)
-    OCR2A = 160;
+    OCR2A = F_CPU / 1024 / ( 50 * LED_CLK_SET_SIZE ) / 2;
 
     // CS22 CS21 CS20  Description
     //  0    0    0    No Clock Source (Timer/Counter stopped)      
@@ -359,8 +349,7 @@ void init_ADC(void){
 
 int main(void) {
 
-    int i = 0;
-    i = sizeof(uint32_t);
+    init_clock_face();
 
     init_timer0();
     init_timer1();
@@ -370,7 +359,7 @@ int main(void) {
 
     sei();
 
-    for ( ;i; ) { }
+    for ( ;; ) { }
 
     return 0;
 
@@ -408,21 +397,32 @@ int main(void) {
 // 8-bit Timer0, freq = 15Hz
 ISR(TIMER0_OVF_vect){
   
-    // _CTRL_ADC_(PHOTODIODE1);
+    // _SIGNAL_ADC_(PHOTODIODE1);
 }
 
 // 16-bit Timer1, freq = 1Hz
 ISR(TIMER1_COMPA_vect){
 
-    ulTickSeconds++;
+    TICKS_SECONDS++;
+
+    if ( __SECONDS__ == 0 ) {
+        IS_PM = !IS_PM;
+    }
+
+    if ( __SECONDS__ % 60 == 0){
+        UpdateMinuteSet(__MINUTES__ % 60, LED_CLK_SET);
+    }
+
+    if ( __SECONDS__ % (60 * 60) == 0 ) {
+        UpdateHourSet(__HOURS__ % 12, &LED_CLK_SET[MINUTE_SET_SIZE]);
+    }
 
 }
 
-// 8-bit Timer2, freq = 50Hz
-// Used for PWM leds 
+// 8-bit Timer2, freq = (50 * LED_CLK_SET_SIZE) Hz
 ISR(TIMER2_COMPA_vect){
 
-    // Flip LED on status
+    _CTRL_LED_( LED_CLK_SET[ ( LED_CLK_SET_INDEX++ % LED_CLK_SET_SIZE ) ] );
 
 }
 
