@@ -16,14 +16,14 @@
 #define MINUTE_SET_SIZE             5
 #define MISC_SET_SIZE               0
 
-#define LED_CLK_SET_SIZE (HOUR_SET_SIZE + MINUTE_SET_SIZE + MISC_SET_SIZE ) 
+//#define LED_CLK_SET_SIZE (HOUR_SET_SIZE + MINUTE_SET_SIZE + MISC_SET_SIZE ) 
 
 #define CHARLIE_MAP_SIZE            30
 
 #define _CTRL_LED_(A)                                   \
     do {                                                \
-        LED_CLK_PORT = CHARLIE_MAP[A].PIO.PORT;         \
-        LED_CLK_DDR  = CHARLIE_MAP[A].PIO.DDR;          \
+        LED_CLK_PORT = CHARLIE_MAP[A];         \
+        LED_CLK_DDR  = CHARLIE_MAP[A] >> 8;          \
     }while(0)
 
 #define _SIGNAL_ADC_(CH)                    \
@@ -56,8 +56,10 @@ union TriStateConfig {
 /* Time keeping counter */
 static volatile uint32_t TICKS_SECONDS = 0; 
 
+static volatile uint8_t LED_CLK_SET_SIZE = 7;
+
 /* Set of current LED configurations */
-static volatile uint8_t LED_CLK_SET[LED_CLK_SET_SIZE] = {0};
+static volatile uint8_t LED_CLK_SET[7] = {0};
 
 /* Current index into LED_CLK_SET */
 static volatile uint8_t LED_CLK_SET_INDEX = 0;
@@ -76,10 +78,10 @@ static volatile uint8_t IS_PM = 1;
  * PD2 ---------------------- 
  */
 
-static const union TriStateConfig CHARLIE_MAP[CHARLIE_MAP_SIZE] = {
+static const uint16_t CHARLIE_MAP[CHARLIE_MAP_SIZE] = {
 
-//  Off                 Mask
-    0b0000000000000000, 0b0011111100111111, 
+//  Off                 
+    0b0000000000000000,
 
 //  DO1                 D02                 D03                 D04
     0b0000001100000001, 0b0000010100000001, 0b0000100100000001, 0b0001000100000001,
@@ -284,7 +286,7 @@ void init_timer2(void){
     //  1    1    1    clk/1024
     
     // 1024 Prescaler
-    TCCR2B = (1<<CS22)|(1<<CS21)|(1<<CS20);
+    TCCR2B = (0<<CS22)|(1<<CS21)|(1<<CS20);
 
     // Normal port operation and enable CTC reset timer of OCR2A match
     TCCR2A = (1<<WGM21);
@@ -349,8 +351,6 @@ void init_ADC(void){
 
 int main(void) {
 
-    init_clock_face();
-
     init_timer0();
     init_timer1();
     init_timer2();
@@ -410,11 +410,11 @@ ISR(TIMER1_COMPA_vect){
     }
 
     if ( __SECONDS__ % 60 == 0){
-        UpdateMinuteSet(__MINUTES__ % 60, LED_CLK_SET);
+//        UpdateMinuteSet(__MINUTES__ % 60, LED_CLK_SET);
     }
 
     if ( __SECONDS__ % (60 * 60) == 0 ) {
-        UpdateHourSet(__HOURS__ % 12, &LED_CLK_SET[MINUTE_SET_SIZE]);
+//        UpdateHourSet(__HOURS__ % 12, &LED_CLK_SET[MINUTE_SET_SIZE]);
     }
 
 }
