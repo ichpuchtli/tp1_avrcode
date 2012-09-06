@@ -22,8 +22,8 @@
 
 #define _CTRL_LED_(A)                                   \
     do {                                                \
-        LED_CLK_PORT = CHARLIE_MAP[A];         \
-        LED_CLK_DDR  = CHARLIE_MAP[A] >> 8;          \
+        LED_CLK_PORT = CHARLIE_MAP[A];                   \
+        LED_CLK_DDR  = CHARLIE_MAP[A] >> 8;              \
     }while(0)
 
 #define _SIGNAL_ADC_(CH)                    \
@@ -359,7 +359,7 @@ int main(void) {
 
     sei();
 
-    for ( ;; ) { }
+    for ( ; ; ) { }
 
     return 0;
 
@@ -422,7 +422,7 @@ ISR(TIMER1_COMPA_vect){
 // 8-bit Timer2, freq = (50 * LED_CLK_SET_SIZE) Hz
 ISR(TIMER2_COMPA_vect){
 
-    _CTRL_LED_( LED_CLK_SET[ ( LED_CLK_SET_INDEX++ % LED_CLK_SET_SIZE ) ] );
+//    _CTRL_LED_( LED_CLK_SET[ ( LED_CLK_SET_INDEX++ % LED_CLK_SET_SIZE ) ] );
 
 }
 
