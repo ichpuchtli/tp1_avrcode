@@ -37,7 +37,7 @@ HEX_EEPROM_FLAGS += --change-section-lma .eeprom=0 --no-change-warnings
 
 
 ## Objects that must be built in order to link
-OBJECTS = main.o 
+OBJECTS = main.o AVRTime.o periph.o
 
 ## Objects explicitly added by the user
 LINKONLYOBJECTS = 
@@ -46,8 +46,14 @@ LINKONLYOBJECTS =
 all: $(TARGET) main.hex main.eep main.lss size
 
 ## Compile
-main.o: main.c
-	$(CC) $(INCLUDES) $(CFLAGS) -c  $<
+main.o: main.c 
+	$(CC) $(INCLUDES) $(CFLAGS) -c $<
+
+AVRTime.o : AVRTime.c
+	$(CC) $(INCLUDES) $(CFLAGS) -c $<
+
+periph.o : periph.c
+	$(CC) $(INCLUDES) $(CFLAGS) -c $<
 
 ##Link
 $(TARGET): $(OBJECTS)
@@ -74,6 +80,10 @@ clean:
 flash: 
 	make
 	avrdude -F -e -y -c avrispmkii -p m48 -P usb -U flash:w:main.hex
+
+log: 
+	make clean
+	make | grep ^main.c:
 
 ## Other dependencies
 -include $(shell mkdir dep 2>/dev/null) $(wildcard dep/*)
