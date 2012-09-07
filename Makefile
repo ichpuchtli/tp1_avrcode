@@ -43,30 +43,30 @@ OBJECTS = main.o AVRTime.o periph.o
 LINKONLYOBJECTS = 
 
 ## Build
-all: $(TARGET) main.hex main.eep main.lss size
+all: $(TARGET) main.hex main.eep main.lss
 
 ## Compile
 main.o: main.c 
-	$(CC) $(INCLUDES) $(CFLAGS) -c $<
+	@$(CC) $(INCLUDES) $(CFLAGS) -c $<
 
 AVRTime.o : AVRTime.c
-	$(CC) $(INCLUDES) $(CFLAGS) -c $<
+	@$(CC) $(INCLUDES) $(CFLAGS) -c $<
 
 periph.o : periph.c
-	$(CC) $(INCLUDES) $(CFLAGS) -c $<
+	@$(CC) $(INCLUDES) $(CFLAGS) -c $<
 
 ##Link
 $(TARGET): $(OBJECTS)
-	 $(CC) $(LDFLAGS) $(OBJECTS) $(LINKONLYOBJECTS) $(LIBDIRS) $(LIBS) -o $(TARGET)
+	@$(CC) $(LDFLAGS) $(OBJECTS) $(LINKONLYOBJECTS) $(LIBDIRS) $(LIBS) -o $(TARGET)
 
 %.hex: $(TARGET)
-	avr-objcopy -O ihex $(HEX_FLASH_FLAGS)  $< $@
+	@avr-objcopy -O ihex $(HEX_FLASH_FLAGS)  $< $@
 
 %.eep: $(TARGET)
-	-avr-objcopy $(HEX_EEPROM_FLAGS) -O ihex $< $@ || exit 0
+	@avr-objcopy $(HEX_EEPROM_FLAGS) -O ihex $< $@ || exit 0
 
 %.lss: $(TARGET)
-	avr-objdump -h -S $< > $@
+	@avr-objdump -h -S $< > $@
 
 size: ${TARGET}
 	@echo
@@ -75,15 +75,11 @@ size: ${TARGET}
 ## Clean target
 .PHONY: clean
 clean:
-	-rm -rf $(OBJECTS) main.elf dep/* main.hex main.eep main.lss main.map
+	@rm -rf $(OBJECTS) main.elf dep main.hex main.eep main.lss main.map
 
 flash: 
-	make
-	avrdude -F -e -y -c avrispmkii -p m48 -P usb -U flash:w:main.hex
-
-log: 
-	make clean
-	make | grep ^main.c:
+	@make
+	@avrdude -F -e -y -c avrispmkii -p m48 -P usb -U flash:w:main.hex
 
 ## Other dependencies
 -include $(shell mkdir dep 2>/dev/null) $(wildcard dep/*)
