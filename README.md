@@ -10,8 +10,8 @@ The goal of the project was to build an analog clock display with digital compon
 Building
 --------
 
-    *make*  
-    *make flash*
+    make  
+    make flash  
 
 License
 -------

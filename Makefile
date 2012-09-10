@@ -72,10 +72,13 @@ size: ${TARGET}
 	@echo
 	@avr-size -C --mcu=${MCU} ${TARGET}
 
+cpp:
+	$(CC) -E -g $(CFLAGS) -o main.cpp main.c
+
 ## Clean target
 .PHONY: clean
 clean:
-	@rm -rf $(OBJECTS) main.elf dep main.hex main.eep main.lss main.map
+	@rm -rf $(OBJECTS) main.elf dep main.hex main.eep main.lss main.map main.cpp
 
 flash: 
 	@make

@@ -1,19 +1,21 @@
 #include "periph.h"
 
-void init_pcint(void){
+void configure_PC_interrupts(void){
 
-    // PCIE0 => PCINT0..7
-    // PCIE1 => PCINT8..14
-    // PCIE2 => PCINT016..23
+    // PCIE0 => PCINT0..7 PORTB
+    // PCIE1 => PCINT8..14 PORTC
+    // PCIE2 => PCINT016..23 PORTD
     
     //Enable Interrupts on Set 1
-    PCICR = (1 << PCIE1);
+    PCICR = (1 << PCIE0) | (1 << PCIE1) | (1 << PCIE2);
 
-    //Use PCINT8
+    // Enable PCINT6 for IR receiver and two software interrupts
+    PCMSK0 = (1 << PCINT6);
     PCMSK1 = (1 << PCINT8);
+    PCMSK2 = (1 << PCINT21);
 }
 
-void init_comparator(void){
+void configure_comparator(void){
 
     // Fire Interrupt on Rising Edge
     ACSR = (0 << ACO) | (1 << ACIE) | (1 << ACIS1) | (1 << ACIS0);  
@@ -22,8 +24,7 @@ void init_comparator(void){
 
 }
 
-
-void init_ADC(void){
+void configure_ADC(void){
 
     // ADC voltage reference
     // REFS1 REFS0 Description
@@ -89,10 +90,10 @@ void trigger_ADC(uint8_t channel){
 }
 
 // 8bit Timer used to trigger ADC conversions
-void init_timer0(void)
+void configure_timer0(void)
 {
     // Freq = F_CPU / prescaler / 255 
-    // Freq ~= 15 Hz 
+    // Freq = 20000000 / 256 / 255 = 306Hz 
     
     // CS02 CS01 CS00  Description
     //  0    0    0    No Clock Source (Timer/Counter stopped)
@@ -107,16 +108,16 @@ void init_timer0(void)
     // Normal Port operation
     TCCR0A = 0x00;
 
-    // 1024 Prescaler 
-    TCCR0B = (1<<CS02)|(0<<CS01)|(1<<CS00);
+    // 256 Prescaler 
+    TCCR0B = (1<<CS02)|(0<<CS01)|(0<<CS00);
 
-    // Just use overflow interrupt
+    // Use overflow interrupt
     TIMSK0 = (0<<OCIE0B)|(0<<OCIE0A)|(1<<TOIE0);
     
 }
 
 // 16bit Timer used to count seconds
-void init_timer1(void){
+void configure_timer1(void){
 
     // CS12 CS11 CS10  Description
     //  0    0    0    No Clock Source (Timer/Counter stopped)      
@@ -145,14 +146,22 @@ void init_timer1(void){
 
 }
 
-// 8-bit timer used to switch TriState PIO for charlieplexing
-void init_timer2(void){
+void start_IR_interceptor(){
+
+    // OCR2A = F_CPU / prescaler / Freq / 2 
+    // OCR2A = 20000000 / 128 / 625 / 2
+    OCR2A =  125;
+
+    // 128 Prescaler in doing so supply timer with a clock source
+    // Start Timer2
+    TCCR2B = (1<<CS22)|(0<<CS21)|(1<<CS20);
+}
+
+// 8-bit timer used intercept IR Stream
+void configure_timer2(void){
 
     // Freq = F_CPU / prescaler / 2 * OCR2A
     // OCR2A = F_CPU / prescaler / Freq / 2 
-    
-    //OCR2A = F_CPU / 1024 / ( 50 * LED_CLK_SET_SIZE ) / 2;
-    OCR2A =  2;
 
     // CS22 CS21 CS20  Description
     //  0    0    0    No Clock Source (Timer/Counter stopped)      
@@ -164,13 +173,14 @@ void init_timer2(void){
     //  1    1    0    clk/256
     //  1    1    1    clk/1024
     
-    // 1024 Prescaler
-    TCCR2B = (0<<CS22)|(0<<CS21)|(1<<CS20);
+    //TCCR2B = (0<<CS22)|(0<<CS21)|(0<<CS20);
+    //Disable Timer Initially
+    TCCR2B = 0x0;
 
     // Normal port operation and enable CTC reset timer of OCR2A match
     TCCR2A = (1<<WGM21);
 
-    // Just use OCR2A Compare match interrupt
+    // Use OCR2A Compare match interrupt
     TIMSK2 = (0<<OCIE2B)|(1<<OCIE2A)|(0<<TOIE2);
 
 }
