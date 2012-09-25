@@ -150,7 +150,7 @@ void start_IR_interceptor(){
 
     // OCR2A = F_CPU / prescaler / Freq / 2 
     // OCR2A = 20000000 / 128 / 625 / 2
-    OCR2A =  125;
+    OCR2A =  100;
 
     // 128 Prescaler in doing so supply timer with a clock source
     // Start Timer2

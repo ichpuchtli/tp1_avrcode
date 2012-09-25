@@ -21,7 +21,6 @@
 #define PIEZO_PORT              PORTC
 #define PIEZO_DDR               DDRC
 #define PIEZO_PIN               1
-#define PIEZO_ON                (PiezoTicks && PiezoTicks--)
 
 ////////////////////////// SOFTWARE INTERRUPTS ////////////////////////////////
 // PCIE0 => PCINT0..7 PORTB
@@ -58,14 +57,14 @@
 // Invert the state of a pin low->high or high->low
 #define INVERT_PIN(PORT,PIN) (PORT ^= (1 << PIN))
 // Returns 1 or 0 if pin is High or Low 
-#define PROBE_PIN(PORT,PIN) ((PORT >> PIN) & 0x01)
+#define PROBE_PIN(PORT,PIN) ((PORT >> PIN) & 0x01) 
 
 // Initialize Onboard time
 static struct AVRTime_t AVRTimeNow = {0};
 static struct AVRTime_t AVRAlarm;
 
-static volatile uint8_t PiezoTicks = 0;
 static volatile uint8_t AlarmOn = 0;
+static volatile uint8_t AlarmSet = 0;
 
 static volatile uint8_t MinuteSet[4] = {0};
 static volatile uint8_t MinuteSetSize = 0;
@@ -75,10 +74,10 @@ static volatile uint8_t HourSet[3] = {0};
 static volatile uint8_t HourSetSize = 0;
 static volatile uint8_t HourSetIndex = 0;
 
-volatile uint8_t PeriphIRBuff = 0;
-volatile uint8_t PeriphIRBits = 0;
+static volatile uint8_t PeriphIRBuff = 0;
+static volatile uint8_t PeriphIRBits = 0;
 
-static inline void select_LED(uint8_t diode){
+static void select_LED(uint8_t diode){
     
     if( diode != 0 ){
         MATRIX_COL_PORT = ( 1 << ( (diode & 0x1F) % 5) );
@@ -87,10 +86,9 @@ static inline void select_LED(uint8_t diode){
 
 }
 
-static inline void null_space(volatile uint8_t* buffer, uint16_t size){
+static void null_space(uint8_t* buffer, uint16_t size){
 
-    while(size--)
-        buffer[size] = (uint8_t) 0x0;
+    while(size--) *(size + buffer) = 0x00;
 }
 
 static inline void trigger_ADC(uint8_t channel){
@@ -103,13 +101,14 @@ static inline void trigger_ADC(uint8_t channel){
 
 }
 
-void process_packet(uint8_t buffer){
+static void process_packet(uint8_t buffer){
 
-    //TODO
+    PORTD = buffer;
+
     return;
 }
 
-void configure_ports(void){
+static void configure_ports(void){
 
     // Multiplexing
     MATRIX_COL_DDR |= 0x1F;
@@ -123,10 +122,15 @@ void configure_ports(void){
     PIEZO_DDR |= (1 << PIEZO_PIN);
 
     //IR Receiver Pin Change Trigger
-    IR_DDR &= ~(1 << IR_PIN);
+    //IR_DDR &= ~(1 << IR_PIN);
+    DDRC = 0x00;
+
+    DDRD = 0xFF;
+    PORTD= 0xFF;
 
 }
-void UpdateHourSet(uint8_t hour){
+
+static void UpdateHourSet(uint8_t hour){
 
     null_space(HourSet,3);
 
@@ -143,7 +147,7 @@ void UpdateHourSet(uint8_t hour){
     }
 }
 
-void UpdateMinuteSet(uint8_t minute){
+static void UpdateMinuteSet(uint8_t minute){
 
    null_space(MinuteSet,4);
 
@@ -164,9 +168,9 @@ void UpdateMinuteSet(uint8_t minute){
 
 int main(void) {
 
-    configure_timer0();
-    configure_timer1();
-    configure_timer2();
+    //configure_timer0(); /* Multiplexer */
+    configure_timer1(); /* Tick Seconds */
+    configure_timer2(); /* Misc IR/Optical Interceptor */
 
     configure_ADC();
     configure_comparator();
@@ -174,10 +178,14 @@ int main(void) {
 
     configure_ports();
 
-    // GO!
+    //GO!
     sei();
 
-    for ( ; ; ) { }
+    for ( ; ; ) {
+    
+        asm("nop");
+    
+    }
 
     return 0;
 
@@ -189,17 +197,32 @@ ISR(SOFT_INT0_vect){ }
 // ISR Triggered by IR_RECEIVER (PCINT8) || SOFT_INT1
 ISR(IR_INCOMING_INT){
 
+
     // Disable PCINT8 Interrupt
     // Don't won't another interrupt until buffer is full
-    PCMSK1 = 0x0;
+    PCICR = 0x0;
 
     PeriphIRBuff = 0x0;
     PeriphIRBits = 0x0;
 
-    // Start Packet Interceptor
-    start_IR_interceptor();
-}
+    PORTD = 0xFF;
 
+    /* waste a few cycles here to sync with middle of level change */
+    _delay_us(700);
+
+    for( int i = 0; i < 8 ; i++){
+
+        PeriphIRBuff |= (PROBE_PIN(IR_PORT, IR_PIN) << PeriphIRBits++ );
+
+        _delay_us(1600);
+
+    }
+
+    // Fire Packet Ready Software Interrupt 
+
+    // Restore Pin Change interrupt
+    PCICR =  (1 << PCIE1);
+}
 
 // Software Interrupt 2
 ISR(SOFT_INT2_vect){ } 
@@ -226,42 +249,27 @@ ISR(TIMER0_OVF_vect){
 // 16-bit Timer1, 1Hz
 ISR(TIMER1_COMPA_vect){ 
 
+    /* update the tick count */
     tick_AVRTime(&AVRTimeNow);
 
-    if(AlarmOn && (comp_AVRTime(&AVRTimeNow, &AVRAlarm) == 0) ){
-        // Sound Alarm (Beep 15 Times)
-        PiezoTicks = 15; 
-        AlarmOn = 0;
+    /* compare the current time with the alarm time */ 
+    if(AlarmSet && (comp_AVRTime(&AVRTimeNow, &AVRAlarm) == 0) ){
+        AlarmOn = 15; // Sound Alarm (Beep 15 Times)
+        AlarmSet = 0;
     }
 
-    if(PIEZO_ON) INVERT_PIN(PIEZO_PORT,PIEZO_PIN);
+    /* Sound the alarm */
+    if(AlarmOn && AlarmOn--){
+        INVERT_PIN(PIEZO_PORT,PIEZO_PIN);
+    }
 
+    /* Trigger an adc conversion to handle auto dimming */
     trigger_ADC(LDR_ADC_CHANNEL);
 }
 
 
 // 8-bit Timer2
-ISR(TIMER2_COMPA_vect){
-
-    // Bit Stream 
-    //       0 1 2 3 4 5 6 7 
-    //     / | | | | | | | |
-    // ----|__--__--____--__
-    //     ^ Falling Edge Triggers PCINT
-    
-    PeriphIRBuff |= (PROBE_PIN(IR_PORT, IR_PIN) << PeriphIRBits++ );
-
-    if( PeriphIRBits >= 8){
-
-        // Disable Timer, by assigning no clock source
-        TCCR2B = 0x0;
-
-        process_packet(PeriphIRBuff);
-        
-        // Re-enable Pin Change Interrupt Ready for another message
-        PCMSK1 = (1 << PCINT8);
-    }
-}
+ISR(TIMER2_COMPA_vect){ }
 
 // 10-bit ADC value left adjusted
 // 8-bit precision with ADCH
