@@ -12,8 +12,8 @@ void init_AVRTime(struct AVRTime_t* stamp){
 
 int16_t comp_AVRTime(struct AVRTime_t* a, struct AVRTime_t* b){
     
-    if( AVR_YEAR(a) < AVR_YEAR(b) )          return -1;
-    if( AVR_YEAR(a) > AVR_YEAR(b) )         return 1;
+    if( AVR_YEAR(a) < AVR_YEAR(b) )      return -1;
+    if( AVR_YEAR(a) > AVR_YEAR(b) )      return 1;
    
     if( AVR_DAY(a) - AVR_DAY(b) )        return AVR_DAY(a) - AVR_DAY(b); 
     if( AVR_HOUR(a) - AVR_HOUR(b) )      return AVR_HOUR(a) - AVR_HOUR(b);
@@ -21,6 +21,22 @@ int16_t comp_AVRTime(struct AVRTime_t* a, struct AVRTime_t* b){
     if( AVR_SEC(a) - AVR_SEC(b) )        return AVR_SEC(a) - AVR_SEC(a);
     
     return 0;
+}
+
+
+void set_AVRTime_time(struct AVRTime_t* stamp, uint8_t hours, uint8_t mins, uint8_t secs){
+
+    stamp->hours = hours;
+    stamp->minutes = mins;
+    stamp->seconds = secs;
+
+}
+
+void set_AVRTime_date(struct AVRTime_t* stamp, uint16_t years, uint16_t days){
+
+    stamp->years = years; 
+    stamp->days = days; 
+
 }
 
 void tick_AVRTime(struct AVRTime_t* stamp){

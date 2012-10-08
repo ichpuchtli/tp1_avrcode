@@ -1,10 +1,10 @@
 #include <avr/io.h>
 
-#define AVR_YEAR(TP)    (TP->years)
-#define AVR_DAY(TP)     (TP->days % 365)
-#define AVR_HOUR(TP)    (TP->hours % 24)
-#define AVR_MIN(TP)     (TP->minutes % 60)
-#define AVR_SEC(TP)     (TP->seconds % 60)
+#define AVR_YEAR(TP)    ((TP)->years)
+#define AVR_DAY(TP)     ((TP)->days % 365)
+#define AVR_HOUR(TP)    ((TP)->hours % 24)
+#define AVR_MIN(TP)     ((TP)->minutes % 60)
+#define AVR_SEC(TP)     ((TP)->seconds % 60)
 
 struct AVRTime_t {
     volatile uint16_t years;        // 0 <=> 65535
@@ -26,3 +26,6 @@ int16_t comp_AVRTime(struct AVRTime_t* a, struct AVRTime_t* b);
 
 /* Increment the seconds counter and overflow into minutes, hours, etc. */
 void tick_AVRTime(struct AVRTime_t* stamp);
+
+void set_AVRTime_time(struct AVRTime_t* stamp, uint8_t hours, uint8_t mins, uint8_t secs);
+void set_AVRTime_date(struct AVRTime_t* stamp, uint16_t years, uint16_t days);
