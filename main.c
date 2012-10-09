@@ -2,6 +2,7 @@
  * File: main.c
  * Author(s): Samuel Macpherson, Blair Zanon
  * Description: AVR Code for Team Project 1 2012 (Clockwork Orange)
+ * Licence: GPL/2.0 
  */
 #include <avr/io.h>
 #include <avr/interrupt.h>
@@ -10,17 +11,15 @@
 #include "periph.h"
 #include "AVRTime.h"
 
-/////////////////////////////// OUTPUTS ///////////////////////////////////////
+/////////////////////////////// MULTIPLEXING //////////////////////////////////
 // Multiplexing LEDs
 #define MATRIX_COL_PORT         PORTD // PORTD0..4
 #define MATRIX_ROW_PORT         PORTB // PORTB0..5
-#define MATRIX_COL_DDR          DDRD // PD0..4
-#define MATRIX_ROW_DDR          DDRB // PD0..5
+#define MATRIX_COL_DDR          DDRD // PORTD0..4
+#define MATRIX_ROW_DDR          DDRB // PORTD0..5
 
-// Piezo Speaker
-#define PIEZO_PORT              PORTC
-#define PIEZO_DDR               DDRC
-#define PIEZO_PIN               1
+#define MATRIX_COLS             0x05
+#define MATRIX_ROWS             0x06
 
 ////////////////////////// SOFTWARE INTERRUPTS ////////////////////////////////
 // PCIE0 => PCINT0..7 PORTB
@@ -48,33 +47,38 @@
 #define IR_DDR                  DDRC
 #define IR_PIN                  0
 
-#define IR_DEF_0 0xA8
-#define IR_DEF_1 0xB6
-#define IR_DEF_2 0xAE
-#define IR_DEF_3 0xBE
-#define IR_DEF_4 0xB2
-#define IR_DEF_5 0xAA
-#define IR_DEF_6 0xBA
-#define IR_DEF_7 0xB4
-#define IR_DEF_8 0xAC
-#define IR_DEF_9 0xBC
+#define IR_DEF_0                0xA8
+#define IR_DEF_1                0xB6
+#define IR_DEF_2                0xAE
+#define IR_DEF_3                0xBE
+#define IR_DEF_4                0xB2
+#define IR_DEF_5                0xAA
+#define IR_DEF_6                0xBA
+#define IR_DEF_7                0xB4
+#define IR_DEF_8                0xAC
+#define IR_DEF_9                0xBC
 
-#define IR_DEF_MENU    0xB7
-#define IR_DEF_ONOFF   0xB8
-#define IR_DEF_BUY     0xAF
-#define IR_DEF_FAV     0xB1
-#define IR_DEF_AB      0xA9
-#define IR_DEF_CHUP    0xAB
-#define IR_DEF_CHDOWN  0xBB
-#define IR_DEF_VOLUP   0xA3
-#define IR_DEF_VOLDOWN 0xB3
-#define IR_DEF_MUTE    0xB0
-#define IR_DEF_ENTER   0xB9
-
+#define IR_DEF_MENU             0xB7
+#define IR_DEF_ONOFF            0xB8
+#define IR_DEF_BUY              0xAF
+#define IR_DEF_FAV              0xB1
+#define IR_DEF_AB               0xA9
+#define IR_DEF_CHUP             0xAB
+#define IR_DEF_CHDOWN           0xBB
+#define IR_DEF_VOLUP            0xA3
+#define IR_DEF_VOLDOWN          0xB3
+#define IR_DEF_MUTE             0xB0
+#define IR_DEF_ENTER            0xB9
 
 ///////////////////////////// LIGHT SENSOR ////////////////////////////////////
 #define LDR_ADC_CHANNEL         0   // PC0 ADC0
 #define LIGHT_THRESHOLD         50  // Threshold Before Proportional Dimming
+
+/////////////////////////////// Misc //////////////////////////////////////////
+// Piezo Speaker
+#define PIEZO_PORT              PORTC
+#define PIEZO_DDR               DDRC
+#define PIEZO_PIN               1
 
 /////////////////////////////// Misc //////////////////////////////////////////
 
@@ -90,29 +94,29 @@
 
 enum DISPLAY_MODES { M_TIME_DISP, M_DATE_DISP, M_ALARM_DISP, M_WEATHER_DISP };
 
-// Initialize Onboard time
-static struct AVRTime_t AVRTimeNow = {0};
+// Initialize On board time
+static struct AVRTime_t AVRTimeNow = {0x00};
 static struct AVRTime_t AVRAlarm;
 
-static volatile uint8_t AlarmOn = 0;
-static volatile uint8_t AlarmSet = 0;
+static volatile uint8_t AlarmOn = 0x00;
+static volatile uint8_t AlarmSet = 0x00;
 
-static volatile uint8_t MinuteSet[4] = {0};
-static volatile uint8_t MinuteSetSize = 0;
-static volatile uint8_t MinuteSetIndex = 0;
+static volatile uint8_t MinuteSet[4] = {0x00};
+static volatile uint8_t MinuteSetSize = 0x00;
+static volatile uint8_t MinuteSetIndex = 0x00;
 
-static volatile uint8_t HourSet[3] = {0};
-static volatile uint8_t HourSetSize = 0;
-static volatile uint8_t HourSetIndex = 0;
+static volatile uint8_t HourSet[4] = {0x00};
+static volatile uint8_t HourSetSize = 0x00;
+static volatile uint8_t HourSetIndex = 0x00;
 
 static volatile uint8_t CUR_DISP_MODE = M_TIME_DISP;
-static volatile uint8_t DISP_MODES = 0x4;
+static volatile uint8_t DISP_MODES = 0x04;
 
 static void select_LED(uint8_t diode){
     
     if( diode != 0 ){
-        MATRIX_COL_PORT = ( 1 << ( (diode & 0x1F) % 5) );
-        MATRIX_ROW_PORT = ( 1 << ( (diode & 0x1F) / 6) );
+        MATRIX_COL_PORT = ( 1 << ( (diode & 0x1F) % MATRIX_COLS) );
+        MATRIX_ROW_PORT = ( 1 << ( (diode & 0x1F) / MATRIX_ROWS) );
     }
 
 }
@@ -122,18 +126,7 @@ static void null_space(uint8_t* buffer, uint16_t size){
     while(size--) *(size + buffer) = 0x00;
 }
 
-static inline void trigger_ADC(uint8_t channel){
-
-    // Select ADC channel
-    ADMUX = channel;
-
-    // Begin Conversion
-    ADCSRA |= (1 << ADSC);
-
-}
-
 void process_num_stack(uint8_t* stack, uint8_t size){
-
 
     uint8_t hours,mins,secs;
     uint16_t days,years; 
@@ -176,8 +169,8 @@ static void dispatch_command(uint8_t byte){
 
     uint8_t num;
 
-    static uint8_t stack[10] = {0};
-    static uint8_t stackSize = 0;
+    static uint8_t stack[10] = {0x00};
+    static uint8_t stackSize = 0x00;
 
     num = -0x01;
 
@@ -193,10 +186,9 @@ static void dispatch_command(uint8_t byte){
         case IR_DEF_7: num = 0x07; break;
         case IR_DEF_8: num = 0x08; break;
         case IR_DEF_9: num = 0x09; break;
-
     }
 
-    if( num > 0x0 ){
+    if( num > 0x00 ){
         stack[stackSize++] = num;
         return;
     }
@@ -220,7 +212,7 @@ static void dispatch_command(uint8_t byte){
             /* Reset number stack */
         case IR_DEF_MENU:
             null_space( stack, 10 );
-            stackSize = 0;
+            stackSize = 0x0;
             break;
 
         default : break;
@@ -231,19 +223,22 @@ static void dispatch_command(uint8_t byte){
 
 static void configure_ports(void){
 
-    // Multiplexing
-    MATRIX_COL_DDR |= 0x1F;
-    MATRIX_ROW_DDR |= 0x3F;
-
+    // Set Multiplexing outputs as low
     MATRIX_COL_PORT &= 0xE0;
     MATRIX_ROW_PORT &= 0xC0;
 
-    //Speaker (Alarm)
+    // Set Multiplexing pins as outputs
+    MATRIX_COL_DDR |= 0x1F;
+    MATRIX_ROW_DDR |= 0x3F;
+
+    //Set Speaker pin as an output and put the pin low 
     PIEZO_PORT &= ~(1 << PIEZO_PIN);
     PIEZO_DDR |= (1 << PIEZO_PIN);
 
     //IR Receiver Pin Change Trigger
-    //IR_DDR &= ~(1 << IR_PIN);
+    // Set IR Pin as inputs
+    IR_DDR &= ~(1 << IR_PIN);
+
     DDRC = 0x00;
 
     DDRD = 0xFF;
@@ -253,18 +248,18 @@ static void configure_ports(void){
 
 static void UpdateHourSet(uint8_t hour){
 
-    null_space((uint8_t*) HourSet, 3);
+    null_space( (uint8_t*) HourSet, 3);
 
     HourSetSize = 2;
 
-    if( hour == 0 ){ return; }
+    if( hour == 0x00 ){ return; }
 
     HourSet[0] = (hour % 12) + 13;
     HourSet[1] = 25;
 
     if( hour > 12 ) { // PM
         HourSet[2] = 28;
-        HourSetSize = 3;
+        HourSetSize = 4;
     }
 }
 
@@ -342,7 +337,20 @@ ISR(IR_INCOMING_INT){
 ISR(SOFT_INT2_vect){ } 
 
 // Optical Comm Trigger
-ISR(ANALOG_COMP_vect){ }
+ISR(ANALOG_COMP_vect){ 
+
+    /*
+     * ~~ -----+     +-----+          +---- ~~
+     * ~~      |     |     |          |     ~~
+     * ~~      |_____|     |__________|     ~~
+     *
+     *         ^ANALOG_COMP_vect
+     *                     ^ANALOG_COMP_vect
+     */
+
+    /* Trigger SOFT_INT1 e.g IR_INCOMING */
+
+}
 
 // 8-bit Timer0, Variable Freq
 ISR(TIMER0_OVF_vect){
@@ -350,14 +358,25 @@ ISR(TIMER0_OVF_vect){
     // Rotate LEDs (Multiplexing)
     // TODO Note: HourSet on avg smaller than minute set may
     // be brighter than minute configurations
-    select_LED( HourSet [ HourSetIndex % HourSetSize ] );
-    HourSetIndex++;
+    switch ( CUR_DISP_MODE ){
+        
+    case M_ALARM_DISP:
+        /* Update Hour/Minute Set with alarm time */
+        UpdateHourSet(AVR_HOUR(&AVRAlarm));
+        UpdateMinuteSet(AVR_MIN(&AVRAlarm));
+        /* Fallthrough */
+    case M_TIME_DISP:
 
-    _delay_ms(1);
+        select_LED( HourSet [ HourSetIndex++ & (HourSetSize - 1) ] );
+        _delay_ms(1);
+        select_LED( MinuteSet [ MinuteSetIndex++ & (MinuteSetSize - 1) ] );
+        break;
 
-    select_LED( MinuteSet [ MinuteSetIndex % MinuteSetSize ] );
-    MinuteSetIndex++;
-    
+    case M_DATE_DISP:
+    case M_WEATHER_DISP:
+    default : break;
+    }
+
 }
 
 // 16-bit Timer1, 1Hz

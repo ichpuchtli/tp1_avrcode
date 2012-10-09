@@ -21,3 +21,6 @@ void configure_timer2(void);
 
 // Initialize Pin Change Interrupts
 void configure_PC_interrupts(void);
+
+// Begin conversion on the ADC channel
+void trigger_ADC(uint8_t channel);
