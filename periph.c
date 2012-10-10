@@ -109,12 +109,14 @@ void configure_timer0(void)
     TCCR0A = 0x00;
 
     // 256 Prescaler 
-    TCCR0B = (1<<CS02)|(0<<CS01)|(0<<CS00);
+    TCCR0B = (0<<CS02)|(1<<CS01)|(0<<CS00);
 
     // Use overflow interrupt
     TIMSK0 = (0<<OCIE0B)|(0<<OCIE0A)|(1<<TOIE0);
     
 }
+
+
 
 // 16bit Timer used to count seconds
 void configure_timer1(void){
@@ -138,7 +140,7 @@ void configure_timer1(void){
     TCCR1A = 0x00;
 
     // 1024 Prescaler & Enable CTC E.G. reset timer on OCR match
-    TCCR1B = (1<<WGM12)|(0<<CS12)|(1<<CS11)|(1<<CS10); 
+    TCCR1B = (1<<WGM12)|(1<<CS12)|(0<<CS11)|(1<<CS10); 
     TCCR1C = 0x00;
 
     // Don't need overflow or OCRB Compare match interrupt

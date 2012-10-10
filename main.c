@@ -39,7 +39,13 @@
 #define SOFT_INT2_vect          PCINT2_vect
 
 // Trigger a software interrupt
-#define FIRE_SOFT_INT(INT)      (SOFT_INT##INT_PORT |= (1 << SOFT_INT##INT_PIN))
+#define FIRE_SOFT_INT0()        INVERT_PIN(SOFT_INT0_PORT, SOFT_INT0_PIN)
+#define FIRE_SOFT_INT1()        INVERT_PIN(SOFT_INT1_PORT, SOFT_INT1_PIN)
+#define FIRE_SOFT_INT2()        INVERT_PIN(SOFT_INT2_PORT, SOFT_INT1_PIN)
+
+/////////////////////////// ANALOG COMPARATOR ///////////////////////////////// 
+#define ANALOG_COMP_PORT        ACSR
+#define ANALOG_COMP_PIN         ACO 
 
 /////////////////////////// IR COMMUNICATION //////////////////////////////////
 #define IR_INCOMING_INT         SOFT_INT1_vect
@@ -83,9 +89,9 @@
 /////////////////////////////// Misc //////////////////////////////////////////
 
 // Invert the state of a pin low->high or high->low
-#define INVERT_PIN(PORT,PIN) (PORT ^= (1 << PIN))
+#define INVERT_PIN(PORT,PIN)    (PORT ^= (1 << PIN))
 // Returns 1 or 0 if pin is High or Low 
-#define PROBE_PIN(PORT,PIN) ((PORT >> PIN) & 0x01) 
+#define PROBE_PIN(PORT,PIN)     ((PORT >> PIN) & 0x01) 
 
 /* Assumes number of constants is a multiple of 2, requirement due to use of
  * & not % */
@@ -101,26 +107,49 @@ static struct AVRTime_t AVRAlarm;
 static volatile uint8_t AlarmOn = 0x00;
 static volatile uint8_t AlarmSet = 0x00;
 
-static volatile uint8_t MinuteSet[4] = {0x00};
-static volatile uint8_t MinuteSetSize = 0x00;
-static volatile uint8_t MinuteSetIndex = 0x00;
+static volatile uint8_t YearSet[4] = {0x00};
+static volatile uint8_t YearSetSize = 0x00;
+static volatile uint8_t YearSetIndex = 0x00;
 
-static volatile uint8_t HourSet[4] = {0x00};
-static volatile uint8_t HourSetSize = 0x00;
-static volatile uint8_t HourSetIndex = 0x00;
+static volatile uint8_t DaySet[4] = {0x00};
+static volatile uint8_t DaySetSize = 0x00;
+static volatile uint8_t DaySetIndex = 0x00;
 
-static volatile uint8_t CUR_DISP_MODE = M_TIME_DISP;
-static volatile uint8_t DISP_MODES = 0x04;
+static volatile uint8_t MonthSet[2] = {0x00};
+static volatile uint8_t MonthSetSize = 0x00;
+static volatile uint8_t MonthSetIndex = 0x00;
+
+static volatile uint8_t DisplaySet[10] = {0x00};
+static volatile uint8_t DisplaySetSize = 0x00;
+
+static volatile uint8_t CurrentDisplayMode = M_TIME_DISP;
+static volatile uint8_t DisplayModes = 0x04;
+
+static volatile uint8_t* IncomingDataPort = &PORTC;
+static volatile uint8_t IncomingDataPin = 0;
 
 static void select_LED(uint8_t diode){
     
     if( diode != 0 ){
-        MATRIX_COL_PORT = ( 1 << ( (diode & 0x1F) % MATRIX_COLS) );
-        MATRIX_ROW_PORT = ( 1 << ( (diode & 0x1F) / MATRIX_ROWS) );
+        PORTD =  ( 1 << ( diode - 1 ) / 6 );
+        PORTB =  ~( 1 << ( diode - 1 ) % 6 );
+
+        //MATRIX_COL_PORT =  ( 1 << ( ( (diode - 1) & 0x1F) / MATRIX_COLS) );
+        //MATRIX_ROW_PORT = ~( 1 << ( ( (diode - 1) & 0x1F) % MATRIX_ROWS) );
     }
 
 }
 
+#define MATRIX_COL_PORT         PORTD // PORTD0..4
+#define MATRIX_ROW_PORT         PORTB // PORTB0..5
+#define MATRIX_COL_DDR          DDRD // PORTD0..4
+#define MATRIX_ROW_DDR          DDRB // PORTD0..5
+
+#define MATRIX_COLS             0x05
+#define MATRIX_ROWS             0x06
+
+////////////////////////// SOFTWARE INTERRUPTS ////////////////////////////////
+// PCIE0 => PCINT0..7 PORTB
 static void null_space(uint8_t* buffer, uint16_t size){
 
     while(size--) *(size + buffer) = 0x00;
@@ -131,7 +160,7 @@ void process_num_stack(uint8_t* stack, uint8_t size){
     uint8_t hours,mins,secs;
     uint16_t days,years; 
 
-    switch( CUR_DISP_MODE ){
+    switch( CurrentDisplayMode ){
 
     case M_TIME_DISP:
         /* Set Time */
@@ -197,12 +226,12 @@ static void dispatch_command(uint8_t byte){
 
         /* Rotate Clock View Alarm, Date, Time, Weather */
         case IR_DEF_CHUP:
-            REWIND_ENUM(CUR_DISP_MODE, DISP_MODES);
+            REWIND_ENUM(CurrentDisplayMode, DisplayModes);
             break; 
 
         /* Rotate Clock View Alarm, Date, Time, Weather */
         case IR_DEF_CHDOWN:
-            ROTATE_ENUM(CUR_DISP_MODE, DISP_MODES);
+            ROTATE_ENUM(CurrentDisplayMode, DisplayModes);
             break;
 
             /* Process the numbers collected depending on the current mode */
@@ -239,47 +268,72 @@ static void configure_ports(void){
     // Set IR Pin as inputs
     IR_DDR &= ~(1 << IR_PIN);
 
-    DDRC = 0x00;
+}
+static void UpdateDaySet(uint8_t day){
+    
+    null_space( (uint8_t*) DaySet, 4);
+    HourSetSize = 4;
 
-    DDRD = 0xFF;
-    PORTD = 0xFF;
-
+    DaySet[0] = 25;
+    DaySet[1] = (day % 10) + 1;
+    DaySet[2] = (day / 10) + 13;
+    DaySet[3] = 0x00; /* Filler */
+    
 }
 
-static void UpdateHourSet(uint8_t hour){
+static uint8_t InsertTimeSet(uint8_t hour, uint8_t min){
 
-    null_space( (uint8_t*) HourSet, 3);
+    uint8_t count = 0;
 
+    null_space( (uint8_t*) DisplaySet, 10);
+
+    count += InsertHourSet(&DisplaySet[count], hour);
+    count += InsertMinuteSet(&DisplaySet[count], min);
+
+    return count;
+}
+
+static void UpdateMonthSet(uint8_t month){
+
+    null_space( (uint8_t*) MonthSet, 2);
     HourSetSize = 2;
 
-    if( hour == 0x00 ){ return; }
+    MonthSet[0] = 26;
+    MonthSet[1] = (month % 12) + 1;
 
-    HourSet[0] = (hour % 12) + 13;
-    HourSet[1] = 25;
-
-    if( hour > 12 ) { // PM
-        HourSet[2] = 28;
-        HourSetSize = 4;
-    }
 }
 
-static void UpdateMinuteSet(uint8_t minute){
+static uint8_t InsertHourSet(uint8_t* set, uint8_t hour){
 
-   null_space((uint8_t*) MinuteSet, 4);
+    uint8_t count = 0;
 
-   MinuteSetSize = 2;
+    if( hour == 0x00 ){ return count; }
 
-   MinuteSet[0] = minute / 5 + 1;
-   MinuteSet[1] = 26;
+    set[count++] = (hour % 12) + 13;
+    set[count++] = 25;
 
-   if( minute % 5 == 0){
-       return;
-   }
+    if( hour > 12 ) { // PM
+        set[count++] = 28;
+    }
 
-   MinuteSet[2] = minute % 5 + 1;
-   MinuteSet[3] = 27;
+    return count;
+}
 
-   MinuteSetSize = 4;
+static void InsertMinuteSet(uint8_t* set, uint8_t minute){
+
+    uint8_t count = 0;
+
+    MinuteSet[count++] = minute / 5 + 1;
+    MinuteSet[count++] = 26;
+
+    if( minute % 5 == 0){
+        return count;
+    }
+
+    MinuteSet[count++] = minute % 5 + 1;
+    MinuteSet[count++] = 27;
+
+    return count;
 }
 
 int main(void) {
@@ -293,6 +347,9 @@ int main(void) {
     configure_PC_interrupts();
 
     configure_ports();
+    
+    UpdateMinuteSet(1);
+    UpdateHourSet(1);
 
     //GO!
     sei();
@@ -306,36 +363,6 @@ int main(void) {
 // Software Interrupt 0
 ISR(SOFT_INT0_vect){ }
 
-// ISR Triggered by IR_RECEIVER (PCINT8) || SOFT_INT1
-ISR(IR_INCOMING_INT){
-
-    // Disable PCINT8 Interrupt
-    // Don't won't another interrupt until buffer is full
-    PCICR = 0x0;
-
-    uint8_t bitBuffer = 0x00;
-
-    /* waste a few cycles here to sync with middle of level change */
-    _delay_us(700);
-
-    for( uint8_t bits = 0; bits < 8 ; bits++){
-
-        bitBuffer |= (PROBE_PIN(IR_PORT, IR_PIN) << bits );
-
-        _delay_us(1600);
-    }
-
-    // Fire Packet Ready Software Interrupt 
-    // TODO Consider Bottom Half Processing in main loop
-    dispatch_command( bitBuffer );
-
-    // Restore Pin Change interrupt
-    PCICR = (1 << PCIE1);
-}
-
-// Software Interrupt 2
-ISR(SOFT_INT2_vect){ } 
-
 // Optical Comm Trigger
 ISR(ANALOG_COMP_vect){ 
 
@@ -348,9 +375,45 @@ ISR(ANALOG_COMP_vect){
      *                     ^ANALOG_COMP_vect
      */
 
-    /* Trigger SOFT_INT1 e.g IR_INCOMING */
+    IncomingDataPort = &ANALOG_COMP_PORT;
+    IncomingDataPin = ANALOG_COMP_PIN;
 
+    FIRE_SOFT_INT1(); /* e.g. IR_INCOMING_INT */
 }
+
+// ISR Triggered by IR_RECEIVER (PCINT8) || SOFT_INT1
+ISR(IR_INCOMING_INT){
+
+    // Disable PCINT8 Interrupt
+    // Don't won't another interrupt until buffer is full
+    PCICR &= ~(1 << PCIE1);
+
+    uint8_t bitBuffer = 0x00;
+
+    /* waste a few cycles here to sync with middle of level change */
+    _delay_us(700);
+
+    for( uint8_t bits = 0; bits < 8 ; bits++){
+
+        bitBuffer |= (PROBE_PIN(*IncomingDataPort, IncomingDataPin) << bits );
+        //bitBuffer |= (PORTC & 0x01) << bits;
+        
+        _delay_us(1600);
+    }
+
+    // Fire Packet Ready Software Interrupt 
+    // TODO Consider Bottom Half Processing in main loop
+    dispatch_command( bitBuffer );
+
+    IncomingDataPort = &IR_PORT;
+    IncomingDataPin = IR_PIN;
+
+    // Restore Pin Change interrupt
+    PCICR |= (1 << PCIE1);
+}
+
+// Software Interrupt 2
+ISR(SOFT_INT2_vect){ } 
 
 // 8-bit Timer0, Variable Freq
 ISR(TIMER0_OVF_vect){
@@ -358,7 +421,7 @@ ISR(TIMER0_OVF_vect){
     // Rotate LEDs (Multiplexing)
     // TODO Note: HourSet on avg smaller than minute set may
     // be brighter than minute configurations
-    switch ( CUR_DISP_MODE ){
+    switch ( CurrentDisplayMode ){
         
     case M_ALARM_DISP:
         /* Update Hour/Minute Set with alarm time */
@@ -368,7 +431,6 @@ ISR(TIMER0_OVF_vect){
     case M_TIME_DISP:
 
         select_LED( HourSet [ HourSetIndex++ & (HourSetSize - 1) ] );
-        _delay_ms(1);
         select_LED( MinuteSet [ MinuteSetIndex++ & (MinuteSetSize - 1) ] );
         break;
 
@@ -386,10 +448,7 @@ ISR(TIMER1_COMPA_vect){
     tick_AVRTime(&AVRTimeNow);
 
     if( AVR_SEC(&AVRTimeNow) == 0 )
-        UpdateMinuteSet( AVR_MIN(&AVRTimeNow) );
-
-    if( AVR_MIN(&AVRTimeNow) == 0 )
-        UpdateHourSet( AVR_HOUR(&AVRTimeNow) );
+        InsertTimeSet( AVR_HOUR(&AVRTimeNow), AVR_MIN(&AVRTimeNow) );
 
     /* compare the current time with the alarm time */ 
     if(AlarmSet && (comp_AVRTime(&AVRTimeNow, &AVRAlarm) == 0) ){
@@ -418,7 +477,7 @@ ISR(ADC_vect) {
     uint8_t voltage = (ADCH * 1100)/255;
     
     if(voltage < LIGHT_THRESHOLD){
-        //Dim LEDs
-        //Slow Switch Speed
+        //Dim LEDs, Set prescale to 1024 up from 256
+        TCCR0B = (1<<CS02)|(0<<CS01)|(1<<CS00);
     }
 }
