@@ -18,7 +18,7 @@
 #define MATRIX_COL_DDR          DDRD // PORTD0..4
 #define MATRIX_ROW_DDR          DDRB // PORTD0..5
 
-#define MATRIX_COLS             0x05
+#define MATRIX_COLS             0x06
 #define MATRIX_ROWS             0x06
 
 ////////////////////////// SOFTWARE INTERRUPTS ////////////////////////////////
@@ -101,26 +101,15 @@
 enum DISPLAY_MODES { M_TIME_DISP, M_DATE_DISP, M_ALARM_DISP, M_WEATHER_DISP };
 
 // Initialize On board time
-static struct AVRTime_t AVRTimeNow = {0x00};
+static struct AVRTime_t AVRTimeNow = AVR_DEFAULT_TIME;
 static struct AVRTime_t AVRAlarm;
 
 static volatile uint8_t AlarmOn = 0x00;
 static volatile uint8_t AlarmSet = 0x00;
 
-static volatile uint8_t YearSet[4] = {0x00};
-static volatile uint8_t YearSetSize = 0x00;
-static volatile uint8_t YearSetIndex = 0x00;
-
-static volatile uint8_t DaySet[4] = {0x00};
-static volatile uint8_t DaySetSize = 0x00;
-static volatile uint8_t DaySetIndex = 0x00;
-
-static volatile uint8_t MonthSet[2] = {0x00};
-static volatile uint8_t MonthSetSize = 0x00;
-static volatile uint8_t MonthSetIndex = 0x00;
-
-static volatile uint8_t DisplaySet[10] = {0x00};
+static volatile uint8_t DisplaySet[20] = {0x00};
 static volatile uint8_t DisplaySetSize = 0x00;
+static volatile uint8_t DisplaySetIndex = 0x00;
 
 static volatile uint8_t CurrentDisplayMode = M_TIME_DISP;
 static volatile uint8_t DisplayModes = 0x04;
@@ -131,25 +120,11 @@ static volatile uint8_t IncomingDataPin = 0;
 static void select_LED(uint8_t diode){
     
     if( diode != 0 ){
-        PORTD =  ( 1 << ( diode - 1 ) / 6 );
-        PORTB =  ~( 1 << ( diode - 1 ) % 6 );
-
-        //MATRIX_COL_PORT =  ( 1 << ( ( (diode - 1) & 0x1F) / MATRIX_COLS) );
-        //MATRIX_ROW_PORT = ~( 1 << ( ( (diode - 1) & 0x1F) % MATRIX_ROWS) );
+        MATRIX_COL_PORT =  ( 1 << ( ( (diode - 1) & 0x1F) / MATRIX_COLS) );
+        MATRIX_ROW_PORT = ~( 1 << ( ( (diode - 1) & 0x1F) % MATRIX_ROWS) );
     }
-
 }
 
-#define MATRIX_COL_PORT         PORTD // PORTD0..4
-#define MATRIX_ROW_PORT         PORTB // PORTB0..5
-#define MATRIX_COL_DDR          DDRD // PORTD0..4
-#define MATRIX_ROW_DDR          DDRB // PORTD0..5
-
-#define MATRIX_COLS             0x05
-#define MATRIX_ROWS             0x06
-
-////////////////////////// SOFTWARE INTERRUPTS ////////////////////////////////
-// PCIE0 => PCINT0..7 PORTB
 static void null_space(uint8_t* buffer, uint16_t size){
 
     while(size--) *(size + buffer) = 0x00;
@@ -267,19 +242,45 @@ static void configure_ports(void){
     //IR Receiver Pin Change Trigger
     // Set IR Pin as inputs
     IR_DDR &= ~(1 << IR_PIN);
-
 }
-static void UpdateDaySet(uint8_t day){
-    
-    null_space( (uint8_t*) DaySet, 4);
-    HourSetSize = 4;
 
-    DaySet[0] = 25;
-    DaySet[1] = (day % 10) + 1;
-    DaySet[2] = (day / 10) + 13;
-    DaySet[3] = 0x00; /* Filler */
-    
+static uint8_t InsertHourSet(uint8_t* set, uint8_t hour){
+
+    uint8_t count = 0;
+
+    set[count++] = (hour % 12) + 1;
+    set[count++] = 29;
+
+    if( hour > 12 ) {
+        set[count-1] = 30;
+    }
+
+    return count;
 }
+
+static uint8_t InsertMinuteSet(uint8_t* set, uint8_t minute){
+
+    uint8_t count = 0;
+
+    set[count++] = minute / 5 + 13;
+
+    switch( minute % 5){
+
+        case 4:
+            set[count++] = 25;
+        case 3:
+            set[count++] = 26;
+        case 2:
+            set[count++] = 27; 
+        case 1:
+            set[count++] = 28;
+        case 0:
+        default:break;
+    }
+
+    return count;
+}
+
 
 static uint8_t InsertTimeSet(uint8_t hour, uint8_t min){
 
@@ -287,51 +288,54 @@ static uint8_t InsertTimeSet(uint8_t hour, uint8_t min){
 
     null_space( (uint8_t*) DisplaySet, 10);
 
-    count += InsertHourSet(&DisplaySet[count], hour);
-    count += InsertMinuteSet(&DisplaySet[count], min);
+    count += InsertHourSet((uint8_t*) &DisplaySet[count], hour);
+    count += InsertMinuteSet((uint8_t*) &DisplaySet[count], min);
 
     return count;
 }
 
-static void UpdateMonthSet(uint8_t month){
-
-    null_space( (uint8_t*) MonthSet, 2);
-    HourSetSize = 2;
-
-    MonthSet[0] = 26;
-    MonthSet[1] = (month % 12) + 1;
-
-}
-
-static uint8_t InsertHourSet(uint8_t* set, uint8_t hour){
+static uint8_t UpdateDaySet(uint8_t* set, uint8_t day){
 
     uint8_t count = 0;
 
-    if( hour == 0x00 ){ return count; }
-
-    set[count++] = (hour % 12) + 13;
     set[count++] = 25;
-
-    if( hour > 12 ) { // PM
-        set[count++] = 28;
-    }
+    set[count++] = (day % 10) + 1;
+    set[count++] = (day / 10) + 13;
 
     return count;
 }
 
-static void InsertMinuteSet(uint8_t* set, uint8_t minute){
+static uint8_t UpdateMonthSet(uint8_t* set, uint8_t month){
 
     uint8_t count = 0;
 
-    MinuteSet[count++] = minute / 5 + 1;
-    MinuteSet[count++] = 26;
+    set[count++] = 26;
+    set[count++] = (month % 12) + 1;
 
-    if( minute % 5 == 0){
-        return count;
+    return count;
+}
+
+static uint8_t InsertYearSet(uint8_t* set, uint16_t year){
+
+    uint8_t count = 0;
+
+    uint8_t start, end;    
+
+    start = year / 1000 + 1;
+    end   = start + ( ( year / 100 ) % 10 );
+
+    for( uint8_t i = start; i <= end; i++){
+
+        set[count++] = i % 12;
     }
 
-    MinuteSet[count++] = minute % 5 + 1;
-    MinuteSet[count++] = 27;
+    start = (year % 100)/10;
+    end = start + year % 10;
+
+    for( uint8_t i = start; i <= end; i++){
+
+        set[count++] = i % 12 + 12;
+    }
 
     return count;
 }
@@ -340,24 +344,21 @@ int main(void) {
 
     configure_timer0(); /* Multiplexer */
     configure_timer1(); /* Tick Seconds */
-    configure_timer2(); /* Misc IR/Optical Interceptor */
+    //configure_timer2(); /* Misc IR/Optical Interceptor */
 
-    configure_ADC();
-    configure_comparator();
+    //configure_ADC();
+    //configure_comparator();
     configure_PC_interrupts();
 
     configure_ports();
-    
-    UpdateMinuteSet(1);
-    UpdateHourSet(1);
 
-    //GO!
     sei();
+
+    DisplaySetSize = InsertTimeSet( AVR_HOUR(&AVRTimeNow), AVR_MIN(&AVRTimeNow) );
 
     for ( ; ; ) asm("nop");
 
     return 0;
-
 }
 
 // Software Interrupt 0
@@ -401,6 +402,8 @@ ISR(IR_INCOMING_INT){
         _delay_us(1600);
     }
 
+    PORTB = bitBuffer;
+
     // Fire Packet Ready Software Interrupt 
     // TODO Consider Bottom Half Processing in main loop
     dispatch_command( bitBuffer );
@@ -421,23 +424,8 @@ ISR(TIMER0_OVF_vect){
     // Rotate LEDs (Multiplexing)
     // TODO Note: HourSet on avg smaller than minute set may
     // be brighter than minute configurations
-    switch ( CurrentDisplayMode ){
-        
-    case M_ALARM_DISP:
-        /* Update Hour/Minute Set with alarm time */
-        UpdateHourSet(AVR_HOUR(&AVRAlarm));
-        UpdateMinuteSet(AVR_MIN(&AVRAlarm));
-        /* Fallthrough */
-    case M_TIME_DISP:
 
-        select_LED( HourSet [ HourSetIndex++ & (HourSetSize - 1) ] );
-        select_LED( MinuteSet [ MinuteSetIndex++ & (MinuteSetSize - 1) ] );
-        break;
-
-    case M_DATE_DISP:
-    case M_WEATHER_DISP:
-    default : break;
-    }
+    select_LED( DisplaySet [ DisplaySetIndex++ % DisplaySetSize ] );
 
 }
 
@@ -448,7 +436,7 @@ ISR(TIMER1_COMPA_vect){
     tick_AVRTime(&AVRTimeNow);
 
     if( AVR_SEC(&AVRTimeNow) == 0 )
-        InsertTimeSet( AVR_HOUR(&AVRTimeNow), AVR_MIN(&AVRTimeNow) );
+        DisplaySetSize = InsertTimeSet( AVR_HOUR(&AVRTimeNow), AVR_MIN(&AVRTimeNow) );
 
     /* compare the current time with the alarm time */ 
     if(AlarmSet && (comp_AVRTime(&AVRTimeNow, &AVRAlarm) == 0) ){

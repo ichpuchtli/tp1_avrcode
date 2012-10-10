@@ -6,6 +6,15 @@
 #define AVR_MIN(TP)     ((TP)->minutes % 60)
 #define AVR_SEC(TP)     ((TP)->seconds % 60)
 
+/* Initial starting time 9:30am,1st January, 2012 */
+#define AVR_DFL_YEAR (2012)
+#define AVR_DFL_DAY  (1)
+#define AVR_DFL_HOUR (0)
+#define AVR_DFL_MIN  (0)
+#define AVR_DFL_SEC  (0)
+
+#define AVR_DEFAULT_TIME {AVR_DFL_YEAR,AVR_DFL_DAY,AVR_DFL_HOUR,AVR_DFL_MIN,AVR_DFL_SEC}
+
 struct AVRTime_t {
     volatile uint16_t years;        // 0 <=> 65535
     volatile int16_t days;         // -32768 <=> 32768 % 365
