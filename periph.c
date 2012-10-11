@@ -1,6 +1,6 @@
 #include "periph.h"
 
-void configure_PC_interrupts(void){
+void init_PC_interrupts(void){
 
     // PCIE0 => PCINT0..7 PORTB
     // PCIE1 => PCINT8..14 PORTC
@@ -15,7 +15,7 @@ void configure_PC_interrupts(void){
     PCMSK2 = (1 << PCINT21);
 }
 
-void configure_comparator(void){
+void init_comparator(void){
 
     // Fire Interrupt on Rising Edge
     ACSR = (0 << ACO) | (1 << ACIE) | (1 << ACIS1) | (1 << ACIS0);  
@@ -24,7 +24,7 @@ void configure_comparator(void){
 
 }
 
-void configure_ADC(void){
+void init_ADC(void){
 
     // ADC voltage reference
     // REFS1 REFS0 Description
@@ -90,7 +90,7 @@ void trigger_ADC(uint8_t channel){
 }
 
 // 8bit Timer used to trigger ADC conversions
-void configure_timer0(void)
+void init_timer0(void)
 {
     // Freq = F_CPU / prescaler / 255 
     // Freq = 20000000 / 256 / 255 = 306Hz 
@@ -119,7 +119,7 @@ void configure_timer0(void)
 
 
 // 16bit Timer used to count seconds
-void configure_timer1(void){
+void init_timer1(void){
 
     // CS12 CS11 CS10  Description
     //  0    0    0    No Clock Source (Timer/Counter stopped)      
@@ -160,7 +160,7 @@ void start_IR_interceptor(){
 }
 
 // 8-bit timer used intercept IR Stream
-void configure_timer2(void){
+void init_timer2(void){
 
     // Freq = F_CPU / prescaler / 2 * OCR2A
     // OCR2A = F_CPU / prescaler / Freq / 2 

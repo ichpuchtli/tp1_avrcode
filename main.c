@@ -38,12 +38,11 @@
 #define SOFT_INT2_PIN           5 // (PCINT21)
 #define SOFT_INT2_vect          PCINT2_vect
 
-// Trigger a software interrupt
 #define FIRE_SOFT_INT0()        INVERT_PIN(SOFT_INT0_PORT, SOFT_INT0_PIN)
 #define FIRE_SOFT_INT1()        INVERT_PIN(SOFT_INT1_PORT, SOFT_INT1_PIN)
 #define FIRE_SOFT_INT2()        INVERT_PIN(SOFT_INT2_PORT, SOFT_INT1_PIN)
 
-/////////////////////////// ANALOG COMPARATOR ///////////////////////////////// 
+/////////////////////////// ANALOG COMPARATOR /////////////////////////////////
 #define ANALOG_COMP_PORT        ACSR
 #define ANALOG_COMP_PIN         ACO 
 
@@ -95,31 +94,31 @@
 
 /* Assumes number of constants is a multiple of 2, requirement due to use of
  * & not % */
-#define ROTATE_ENUM(MODE, ENUMS) do { MODE += 1; MODE &= (ENUMS - 1); } while(0)
-#define REWIND_ENUM(MODE, ENUMS) do { MODE -= 1; MODE &= (ENUMS - 1); } while(0)
+#define ROTATE_ENUM(MODE, ENUMS) do { MODE++; MODE &= (ENUMS - 1); } while(0)
+#define REWIND_ENUM(MODE, ENUMS) do { MODE--; MODE &= (ENUMS - 1); } while(0)
 
 enum DISPLAY_MODES { M_TIME_DISP, M_DATE_DISP, M_ALARM_DISP, M_WEATHER_DISP };
 
 // Initialize On board time
-static struct AVRTime_t AVRTimeNow = AVR_DEFAULT_TIME;
+static struct AVRTime_t AVRTime = AVR_DEFAULT_TIME;
 static struct AVRTime_t AVRAlarm;
 
 static volatile uint8_t AlarmOn = 0x00;
 static volatile uint8_t AlarmSet = 0x00;
 
-static volatile uint8_t DisplaySet[20] = {0x00};
-static volatile uint8_t DisplaySetSize = 0x00;
-static volatile uint8_t DisplaySetIndex = 0x00;
+static volatile uint8_t LEDSet[20] = {0x00};
+static volatile uint8_t LEDSetSize = 0x00;
+static volatile uint8_t LEDSetPos  = 0x00;
 
-static volatile uint8_t CurrentDisplayMode = M_TIME_DISP;
-static volatile uint8_t DisplayModes = 0x04;
+static volatile uint8_t CurrDispMode   = M_TIME_DISP;
+static volatile uint8_t TotalDispModes = 0x04;
 
 static volatile uint8_t* IncomingDataPort = &PORTC;
 static volatile uint8_t IncomingDataPin = 0;
 
 static void select_LED(uint8_t diode){
     
-    if( diode != 0 ){
+    if( diode > 0 ){
         MATRIX_COL_PORT =  ( 1 << ( ( (diode - 1) & 0x1F) / MATRIX_COLS) );
         MATRIX_ROW_PORT = ~( 1 << ( ( (diode - 1) & 0x1F) % MATRIX_ROWS) );
     }
@@ -135,15 +134,15 @@ void process_num_stack(uint8_t* stack, uint8_t size){
     uint8_t hours,mins,secs;
     uint16_t days,years; 
 
-    switch( CurrentDisplayMode ){
+    switch( CurrDispMode ){
 
     case M_TIME_DISP:
         /* Set Time */
-        hours = stack[0]* 10 + stack[1];
+        hours = stack[0] * 10 + stack[1];
         mins  = stack[2] * 10 + stack[3];
         secs  = stack[4] * 10 + stack[5];
 
-        set_AVRTime_time(&AVRTimeNow, hours, mins, secs);
+        set_AVRTime_time(&AVRTime, hours, mins, secs);
         break;
 
     case M_DATE_DISP:
@@ -151,7 +150,7 @@ void process_num_stack(uint8_t* stack, uint8_t size){
         years = stack[0] * 1000 + stack[1] * 100 + stack[2] * 10 + stack[3];
         days  = stack[4] * 100 + stack[5] * 10 + stack[6];
 
-        set_AVRTime_date(&AVRTimeNow, years, days); 
+        set_AVRTime_date(&AVRTime, years, days); 
         break;
 
     case M_ALARM_DISP:
@@ -201,12 +200,12 @@ static void dispatch_command(uint8_t byte){
 
         /* Rotate Clock View Alarm, Date, Time, Weather */
         case IR_DEF_CHUP:
-            REWIND_ENUM(CurrentDisplayMode, DisplayModes);
+            REWIND_ENUM(CurrDispMode, TotalDispModes);
             break; 
 
         /* Rotate Clock View Alarm, Date, Time, Weather */
         case IR_DEF_CHDOWN:
-            ROTATE_ENUM(CurrentDisplayMode, DisplayModes);
+            ROTATE_ENUM(CurrDispMode, TotalDispModes);
             break;
 
             /* Process the numbers collected depending on the current mode */
@@ -225,26 +224,7 @@ static void dispatch_command(uint8_t byte){
 
 }
 
-static void configure_ports(void){
-
-    // Set Multiplexing outputs as low
-    MATRIX_COL_PORT &= 0xE0;
-    MATRIX_ROW_PORT &= 0xC0;
-
-    // Set Multiplexing pins as outputs
-    MATRIX_COL_DDR |= 0x1F;
-    MATRIX_ROW_DDR |= 0x3F;
-
-    //Set Speaker pin as an output and put the pin low 
-    PIEZO_PORT &= ~(1 << PIEZO_PIN);
-    PIEZO_DDR |= (1 << PIEZO_PIN);
-
-    //IR Receiver Pin Change Trigger
-    // Set IR Pin as inputs
-    IR_DDR &= ~(1 << IR_PIN);
-}
-
-static uint8_t InsertHourSet(uint8_t* set, uint8_t hour){
+static uint8_t insert_hour_set(uint8_t* set, uint8_t hour){
 
     uint8_t count = 0;
 
@@ -258,7 +238,7 @@ static uint8_t InsertHourSet(uint8_t* set, uint8_t hour){
     return count;
 }
 
-static uint8_t InsertMinuteSet(uint8_t* set, uint8_t minute){
+static uint8_t insert_minute_set(uint8_t* set, uint8_t minute){
 
     uint8_t count = 0;
 
@@ -282,19 +262,17 @@ static uint8_t InsertMinuteSet(uint8_t* set, uint8_t minute){
 }
 
 
-static uint8_t InsertTimeSet(uint8_t hour, uint8_t min){
+static uint8_t insert_time_set(uint8_t hour, uint8_t min){
 
     uint8_t count = 0;
 
-    null_space( (uint8_t*) DisplaySet, 10);
-
-    count += InsertHourSet((uint8_t*) &DisplaySet[count], hour);
-    count += InsertMinuteSet((uint8_t*) &DisplaySet[count], min);
+    count += insert_hour_set((uint8_t*) &LEDSet[count], hour);
+    count += insert_minute_set((uint8_t*) &LEDSet[count], min);
 
     return count;
 }
 
-static uint8_t UpdateDaySet(uint8_t* set, uint8_t day){
+static uint8_t update_day_set(uint8_t* set, uint8_t day){
 
     uint8_t count = 0;
 
@@ -305,7 +283,7 @@ static uint8_t UpdateDaySet(uint8_t* set, uint8_t day){
     return count;
 }
 
-static uint8_t UpdateMonthSet(uint8_t* set, uint8_t month){
+static uint8_t update_month_set(uint8_t* set, uint8_t month){
 
     uint8_t count = 0;
 
@@ -315,7 +293,7 @@ static uint8_t UpdateMonthSet(uint8_t* set, uint8_t month){
     return count;
 }
 
-static uint8_t InsertYearSet(uint8_t* set, uint16_t year){
+static uint8_t insert_year_set(uint8_t* set, uint16_t year){
 
     uint8_t count = 0;
 
@@ -340,21 +318,45 @@ static uint8_t InsertYearSet(uint8_t* set, uint16_t year){
     return count;
 }
 
+static void init_LED_set(void){
+
+    LEDSetSize = insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
+}
+
+static void init_ports(void){
+
+    // Set Multiplexing outputs as low
+    MATRIX_COL_PORT &= 0xE0;
+    MATRIX_ROW_PORT &= 0xC0;
+
+    // Set Multiplexing pins as outputs
+    MATRIX_COL_DDR |= 0x1F;
+    MATRIX_ROW_DDR |= 0x3F;
+
+    //Set Speaker pin as an output and put the pin low 
+    PIEZO_PORT &= ~(1 << PIEZO_PIN);
+    PIEZO_DDR |= (1 << PIEZO_PIN);
+
+    //IR Receiver Pin Change Trigger
+    // Set IR Pin as inputs
+    IR_DDR &= ~(1 << IR_PIN);
+}
+
 int main(void) {
 
-    configure_timer0(); /* Multiplexer */
-    configure_timer1(); /* Tick Seconds */
-    //configure_timer2(); /* Misc IR/Optical Interceptor */
+    init_timer0(); /* Multiplexer */
+    init_timer1(); /* Tick Seconds */
+    init_timer2(); /* Misc IR/Optical Interceptor */
 
-    //configure_ADC();
-    //configure_comparator();
-    configure_PC_interrupts();
+    init_ADC();
+    init_comparator();
+    init_PC_interrupts();
 
-    configure_ports();
+    init_ports();
+
+    init_LED_set();
 
     sei();
-
-    DisplaySetSize = InsertTimeSet( AVR_HOUR(&AVRTimeNow), AVR_MIN(&AVRTimeNow) );
 
     for ( ; ; ) asm("nop");
 
@@ -402,8 +404,6 @@ ISR(IR_INCOMING_INT){
         _delay_us(1600);
     }
 
-    PORTB = bitBuffer;
-
     // Fire Packet Ready Software Interrupt 
     // TODO Consider Bottom Half Processing in main loop
     dispatch_command( bitBuffer );
@@ -425,7 +425,7 @@ ISR(TIMER0_OVF_vect){
     // TODO Note: HourSet on avg smaller than minute set may
     // be brighter than minute configurations
 
-    select_LED( DisplaySet [ DisplaySetIndex++ % DisplaySetSize ] );
+    select_LED( LEDSet [ LEDSetPos++ % LEDSetSize ] );
 
 }
 
@@ -433,13 +433,13 @@ ISR(TIMER0_OVF_vect){
 ISR(TIMER1_COMPA_vect){ 
 
     /* update the tick count */
-    tick_AVRTime(&AVRTimeNow);
+    tick_AVRTime(&AVRTime);
 
-    if( AVR_SEC(&AVRTimeNow) == 0 )
-        DisplaySetSize = InsertTimeSet( AVR_HOUR(&AVRTimeNow), AVR_MIN(&AVRTimeNow) );
+    if( AVR_SEC(&AVRTime) == 0 )
+        LEDSetSize = insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
 
     /* compare the current time with the alarm time */ 
-    if(AlarmSet && (comp_AVRTime(&AVRTimeNow, &AVRAlarm) == 0) ){
+    if(AlarmSet && (comp_AVRTime(&AVRTime, &AVRAlarm) == 0) ){
         AlarmOn = 15; // Sound Alarm (Beep 15 Times)
         AlarmSet = 0;
     }
@@ -462,10 +462,9 @@ ISR(TIMER2_COMPA_vect){ }
 ISR(ADC_vect) {
 
     // ADCH = Vin * 255 / VREF
-    uint8_t voltage = (ADCH * 1100)/255;
+    uint16_t voltage = (ADCH * 1100)/255;
     
     if(voltage < LIGHT_THRESHOLD){
-        //Dim LEDs, Set prescale to 1024 up from 256
-        TCCR0B = (1<<CS02)|(0<<CS01)|(1<<CS00);
+        //Dim LEDs
     }
 }

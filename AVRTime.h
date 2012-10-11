@@ -13,7 +13,13 @@
 #define AVR_DFL_MIN  (0)
 #define AVR_DFL_SEC  (0)
 
-#define AVR_DEFAULT_TIME {AVR_DFL_YEAR,AVR_DFL_DAY,AVR_DFL_HOUR,AVR_DFL_MIN,AVR_DFL_SEC}
+#define AVR_DEFAULT_TIME { \
+    AVR_DFL_YEAR,          \
+    AVR_DFL_DAY,           \
+    AVR_DFL_HOUR,          \
+    AVR_DFL_MIN,           \
+    AVR_DFL_SEC            \
+}
 
 struct AVRTime_t {
     volatile uint16_t years;        // 0 <=> 65535
