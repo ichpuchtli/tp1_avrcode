@@ -11,7 +11,7 @@
 #include "periph.h"
 #include "AVRTime.h"
 
-/////////////////////////////// MULTIPLEXING //////////////////////////////////
+///////////////////////////// MULTIPLEXING ////////////////////////////////////
 #define MATRIX_COL_PORT         PORTD // PORTD0..4
 #define MATRIX_ROW_PORT         PORTB // PORTB0..5
 #define MATRIX_COL_DDR          DDRD // PORTD0..4
@@ -20,8 +20,7 @@
 #define MATRIX_COLS             0x06
 #define MATRIX_ROWS             0x06
 
-////////////////////////// SOFTWARE INTERRUPTS ////////////////////////////////
-// PCIE0 => PCINT0..7 PORTB
+///////////////////////////// SOFTWARE INTERRUPTS ///////////////////////////// // PCIE0 => PCINT0..7 PORTB
 #define SOFT_INT0_PORT          PINB
 #define SOFT_INT0_PIN           6 // (PCINT6) 
 #define SOFT_INT0_vect          PCINT0_vect
@@ -41,7 +40,7 @@
 #define FIRE_SOFT_INT1()        INVERT_PIN(SOFT_INT1_PORT, SOFT_INT1_PIN)
 #define FIRE_SOFT_INT2()        INVERT_PIN(SOFT_INT2_PORT, SOFT_INT1_PIN)
 
-/////////////////////////// ANALOG COMPARATOR /////////////////////////////////
+///////////////////////////// ANALOG COMPARATOR ///////////////////////////////
 #define ANALOG_COMP_PORT        ACSR
 #define ANALOG_COMP_PIN         ACO 
 
@@ -49,12 +48,12 @@
 #define LDR_ADC_CHANNEL         0   // PC2
 #define LIGHT_THRESHOLD         50  // Threshold Before Proportional Dimming
 
-//////////////////////////// PIEZO SPEAKER ////////////////////////////////////
+///////////////////////////// PIEZO SPEAKER ///////////////////////////////////
 #define PIEZO_PORT              PORTC
 #define PIEZO_DDR               DDRC
 #define PIEZO_PIN               1
 
-/////////////////////////// IR COMMUNICATION //////////////////////////////////
+///////////////////////////// IR COMMUNICATION ////////////////////////////////
 #define IR_INCOMING_INT         SOFT_INT1_vect
 #define IR_PORT                 PINC 
 #define IR_DDR                  DDRC
@@ -83,21 +82,15 @@
 #define IR_DEF_MUTE             0xB0
 #define IR_DEF_ENTER            0xB9
 
-///////////////////////////// FUNCTIONS ///////////////////////////////////////
-// Invert the state of a pin low->high or high->low
-#define INVERT_PIN(PORT,PIN)    (PORT ^= (1 << PIN))
-// Returns 1 or 0 if pin is High or Low 
-#define PROBE_PIN(PORT,PIN)     ((PORT >> PIN) & 0x01) 
-
-/* Assumes number of constants is a multiple of 2, requirement due to use of
- * & not % */
-#define ROTATE_ENUM(MODE, NUM)  do { MODE++; MODE &= (NUM - 1); } while(0)
-#define REWIND_ENUM(MODE, NUM)  do { MODE--; MODE &= (NUM - 1); } while(0)
+/* Invert the state of a pin low->high or high->low */
+#define INVERT_PIN(REG,PIN)    (REG ^= (1 << PIN))
+/* Returns 1 or 0 if pin is High or Low */
+#define PROBE_PIN(REG,PIN)     (REG & (1 << PIN)) 
 
 enum DISPLAY_MODES { M_TIME_DISP, M_DATE_DISP, M_ALARM_DISP, M_WEATHER_DISP };
 
-// Initialize On board time
-static struct AVRTime_t AVRTime = AVR_DEFAULT_TIME;
+/* Initialize on board time */
+static struct AVRTime_t AVRTime = AVR_INIT_TIME(9,30,0);
 static struct AVRTime_t AVRAlarm;
 
 static volatile uint8_t AlarmOn = 0x00;
@@ -107,18 +100,21 @@ static volatile uint8_t LEDSet[8] = {0x00};
 static volatile uint8_t LEDSetSize = 0x00;
 static volatile uint8_t LEDSetPos  = 0x00;
 
-static volatile uint8_t CurrDispMode   = M_TIME_DISP;
+static volatile uint8_t CurrDispMode = M_TIME_DISP;
 static volatile uint8_t TotalDispModes = 0x04;
 
 static void select_LED(uint8_t diode){
 
-    volatile uint8_t tmp_row = ~( 1 << ( ( diode - 1) % MATRIX_ROWS ) );
-    volatile uint8_t tmp_col = 1 << ( ( diode - 1) / MATRIX_COLS);
-    
-    if( diode > 0 ){
-        MATRIX_ROW_PORT = tmp_row;
-        MATRIX_COL_PORT = tmp_col; 
-    }
+    if( diode == 0) return;
+
+    /* Calculate new row x col combination before changing port values,
+     * introduce volatile qualifier to prevent unwanted optimisation
+     */
+    volatile uint8_t row = ~( 1 << ( ( diode - 1) % MATRIX_ROWS ) );
+    volatile uint8_t col = 1 << ( ( diode - 1) / MATRIX_COLS);
+
+    MATRIX_ROW_PORT = row;
+    MATRIX_COL_PORT = col; 
 }
 
 static void null_space(uint8_t* buffer, uint16_t size){
@@ -131,7 +127,7 @@ void process_num_stack(uint8_t* stack, uint8_t size){
     uint8_t hours,mins,secs;
     uint16_t days,years; 
 
-    switch( CurrDispMode ){
+    switch( CurrDispMode & (TotalDispModes - 1) ){
 
     case M_TIME_DISP:
         /* Set Time */
@@ -197,12 +193,12 @@ static void dispatch_command(uint8_t byte){
 
         /* Rotate Clock View Alarm, Date, Time, Weather */
         case IR_DEF_CHUP:
-            REWIND_ENUM(CurrDispMode, TotalDispModes);
+            CurrDispMode++;
             break; 
 
         /* Rotate Clock View Alarm, Date, Time, Weather */
         case IR_DEF_CHDOWN:
-            ROTATE_ENUM(CurrDispMode, TotalDispModes);
+            CurrDispMode++;
             break;
 
             /* Process the numbers collected depending on the current mode */
@@ -325,25 +321,25 @@ int main(void) {
     init_comparator();
     init_PC_interrupts();
 
-    // Set Multiplexing outputs as low
+    /* Set multiplexing outputs as low */
     MATRIX_COL_PORT &= 0xE0;
     MATRIX_ROW_PORT &= 0xC0;
 
-    // Set Multiplexing pins as outputs
+    /* Set multiplexing pins as outputs */
     MATRIX_COL_DDR |= 0x1F;
     MATRIX_ROW_DDR |= 0x3F;
 
-    // Set Speaker pin as an output and put the pin low 
+    /* Set speaker pin as an output and put the pin low */
     PIEZO_PORT &= ~(1 << PIEZO_PIN);
     PIEZO_DDR |= (1 << PIEZO_PIN);
 
-    // Set IR Pin as an input
+    /* Set IR Pin as an input */
     IR_DDR &= ~(1 << IR_PIN);
 
-    // Fill the led set with the default time
+    /* Fill the led set with the default time */
     LEDSetSize = insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
 
-    // Enable Interrupts
+    /* Enable interrupts */
     sei();
     
     for ( ; ; ) asm("nop");
@@ -351,10 +347,10 @@ int main(void) {
     return 0;
 }
 
-// Software Interrupt 0
+/* Software Interrupt 0 */
 ISR(SOFT_INT0_vect){ }
 
-// Optical Comm Trigger
+/* Optical Comm Trigger */
 ISR(ANALOG_COMP_vect){ 
     
     INVERT_PIN(PIEZO_PORT, PIEZO_PIN);
@@ -373,74 +369,76 @@ ISR(ANALOG_COMP_vect){
      */
 }
 
-// ISR Triggered by IR_RECEIVER (PCINT8) || SOFT_INT1
+/* ISR Triggered by IR_RECEIVER (PCINT8) || SOFT_INT1 */
 ISR(IR_INCOMING_INT){
 
-    uint8_t bitBuffer = 0x0000;
+    uint8_t buf = 0x00;
 
     /* waste a few cycles here to sync with middle of level change */
     _delay_us(800);
 
     for( uint8_t bits = 0; bits < 8 ; bits++){
-        bitBuffer |= PROBE_PIN(IR_PORT, IR_PIN) << bits;
+
+        buf |= PROBE_PIN(IR_PORT, IR_PIN) << bits;
+
         _delay_us(1600);
     }
 
-    // TODO Consider Bottom Half Processing in main loop
-    dispatch_command( bitBuffer );
+    /* TODO Consider Bottom Half Processing in main loop */
+    dispatch_command( buf );
 
+    /* Clear interrupt flag to prevent recuring interrupts */
     PCIFR |= (1 << PCIF1);
 }
 
-// Software Interrupt 2
+/* Software Interrupt 2 */
 ISR(SOFT_INT2_vect){ } 
 
-// 8-bit Timer0
+/* 8-bit Timer0 */
 ISR(TIMER0_OVF_vect){
 
-    // Rotate LEDs (Multiplexing)
-    
+    /* Wrap LEDSetPos quicker than modulo */
     if(LEDSetPos == LEDSetSize) LEDSetPos = 0x0;
 
+    /* Rotate LEDs (Multiplexing) */
     select_LED( LEDSet [ LEDSetPos++ ] );
-
 }
 
-// 16-bit Timer1, 1Hz
+/* 16-bit Timer1, 1Hz */
 ISR(TIMER1_COMPA_vect){ 
 
-    /* update the tick count */
+    /* Update the tick count */
     tick_AVRTime(&AVRTime);
 
+    /* Update the LEDSet if a new minute has tick over */
     if( AVR_SEC(&AVRTime) == 0 ) 
         LEDSetSize = insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
 
-    /* compare the current time with the alarm time */ 
+    /* Compare the current time with the alarm time */ 
     if(AlarmSet && (comp_AVRTime(&AVRTime, &AVRAlarm) == 0) ){
-        AlarmOn = 15; // Sound Alarm (Beep 15 Times)
+        AlarmOn = 255; /* Sound Alarm (Beep 255 Times) */
         AlarmSet = 0;
     }
+}
+
+/* 8-bit Timer2 */
+ISR(TIMER2_COMPA_vect){
 
     /* Sound the alarm */
     if(AlarmOn && AlarmOn--){
         INVERT_PIN(PIEZO_PORT,PIEZO_PIN);
     }
 
-    /* Trigger an adc conversion to handle auto dimming */
+    /* Trigger an ADC conversion to handle auto dimming */
     trigger_ADC(LDR_ADC_CHANNEL);
 }
 
-// 8-bit Timer2
-ISR(TIMER2_COMPA_vect){ }
-
-// 10-bit ADC value left adjusted
-// 8-bit precision with ADCH
+/* 10-bit ADC value left adjusted */
+/* 8-bit precision with ADCH */
 ISR(ADC_vect) {
 
-    // ADCH = Vin * 255 / VREF
+    /* ADCH = Vin * 255 / VREF */
     uint16_t voltage = (ADCH * 1100)/255;
     
-    if(voltage < LIGHT_THRESHOLD){
-        //Dim LEDs
-    }
+    if(voltage < LIGHT_THRESHOLD);
 }

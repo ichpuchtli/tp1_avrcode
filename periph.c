@@ -175,16 +175,14 @@ void init_timer2(void){
     //  1    0    1    clk/128
     //  1    1    0    clk/256
     //  1    1    1    clk/1024
-    
-    //TCCR2B = (0<<CS22)|(0<<CS21)|(0<<CS20);
-    //Disable Timer Initially
-    TCCR2B = 0x0;
+   
+    // 1024 prescaler, freq = F_CPU / 1024 / 256
+    TCCR2B = (1<<CS22)|(1<<CS21)|(1<<CS20);
 
     // Normal port operation and enable CTC reset timer of OCR2A match
     TCCR2A = (1<<WGM21);
 
     // Use OCR2A Compare match interrupt
-    TIMSK2 = (0<<OCIE2B)|(1<<OCIE2A)|(0<<TOIE2);
-
+    TIMSK2 = (0<<OCIE2B)|(0<<OCIE2A)|(1<<TOIE2);
 }
 

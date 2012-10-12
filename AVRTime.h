@@ -21,6 +21,14 @@
     AVR_DFL_SEC            \
 }
 
+#define AVR_INIT_TIME(HOUR,MINUTE,SECOND) { \
+    AVR_DFL_YEAR,                              \
+    AVR_DFL_DAY,                               \
+    HOUR,                                      \
+    MINUTE,                                    \
+    SECOND                                     \
+}
+
 struct AVRTime_t {
     volatile uint16_t years;        // 0 <=> 65535
     volatile uint16_t days;         // -32768 <=> 32768 % 365
