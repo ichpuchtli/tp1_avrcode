@@ -12,7 +12,6 @@
 #include "AVRTime.h"
 
 /////////////////////////////// MULTIPLEXING //////////////////////////////////
-// Multiplexing LEDs
 #define MATRIX_COL_PORT         PORTD // PORTD0..4
 #define MATRIX_ROW_PORT         PORTB // PORTB0..5
 #define MATRIX_COL_DDR          DDRD // PORTD0..4
@@ -46,9 +45,18 @@
 #define ANALOG_COMP_PORT        ACSR
 #define ANALOG_COMP_PIN         ACO 
 
+///////////////////////////// LIGHT SENSOR ////////////////////////////////////
+#define LDR_ADC_CHANNEL         0   // PC2
+#define LIGHT_THRESHOLD         50  // Threshold Before Proportional Dimming
+
+//////////////////////////// PIEZO SPEAKER ////////////////////////////////////
+#define PIEZO_PORT              PORTC
+#define PIEZO_DDR               DDRC
+#define PIEZO_PIN               1
+
 /////////////////////////// IR COMMUNICATION //////////////////////////////////
 #define IR_INCOMING_INT         SOFT_INT1_vect
-#define IR_PORT                 PORTC 
+#define IR_PORT                 PINC 
 #define IR_DDR                  DDRC
 #define IR_PIN                  0
 
@@ -75,18 +83,7 @@
 #define IR_DEF_MUTE             0xB0
 #define IR_DEF_ENTER            0xB9
 
-///////////////////////////// LIGHT SENSOR ////////////////////////////////////
-#define LDR_ADC_CHANNEL         0   // PC0 ADC0
-#define LIGHT_THRESHOLD         50  // Threshold Before Proportional Dimming
-
-/////////////////////////////// Misc //////////////////////////////////////////
-// Piezo Speaker
-#define PIEZO_PORT              PORTC
-#define PIEZO_DDR               DDRC
-#define PIEZO_PIN               1
-
-/////////////////////////////// Misc //////////////////////////////////////////
-
+///////////////////////////// FUNCTIONS ///////////////////////////////////////
 // Invert the state of a pin low->high or high->low
 #define INVERT_PIN(PORT,PIN)    (PORT ^= (1 << PIN))
 // Returns 1 or 0 if pin is High or Low 
@@ -94,8 +91,8 @@
 
 /* Assumes number of constants is a multiple of 2, requirement due to use of
  * & not % */
-#define ROTATE_ENUM(MODE, ENUMS) do { MODE++; MODE &= (ENUMS - 1); } while(0)
-#define REWIND_ENUM(MODE, ENUMS) do { MODE--; MODE &= (ENUMS - 1); } while(0)
+#define ROTATE_ENUM(MODE, NUM)  do { MODE++; MODE &= (NUM - 1); } while(0)
+#define REWIND_ENUM(MODE, NUM)  do { MODE--; MODE &= (NUM - 1); } while(0)
 
 enum DISPLAY_MODES { M_TIME_DISP, M_DATE_DISP, M_ALARM_DISP, M_WEATHER_DISP };
 
@@ -106,21 +103,21 @@ static struct AVRTime_t AVRAlarm;
 static volatile uint8_t AlarmOn = 0x00;
 static volatile uint8_t AlarmSet = 0x00;
 
-static volatile uint8_t LEDSet[20] = {0x00};
+static volatile uint8_t LEDSet[8] = {0x00};
 static volatile uint8_t LEDSetSize = 0x00;
 static volatile uint8_t LEDSetPos  = 0x00;
 
 static volatile uint8_t CurrDispMode   = M_TIME_DISP;
 static volatile uint8_t TotalDispModes = 0x04;
 
-static volatile uint8_t* IncomingDataPort = &PORTC;
-static volatile uint8_t IncomingDataPin = 0;
-
 static void select_LED(uint8_t diode){
+
+    volatile uint8_t tmp_row = ~( 1 << ( ( diode - 1) % MATRIX_ROWS ) );
+    volatile uint8_t tmp_col = 1 << ( ( diode - 1) / MATRIX_COLS);
     
     if( diode > 0 ){
-        MATRIX_COL_PORT =  ( 1 << ( ( (diode - 1) & 0x1F) / MATRIX_COLS) );
-        MATRIX_ROW_PORT = ~( 1 << ( ( (diode - 1) & 0x1F) % MATRIX_ROWS) );
+        MATRIX_ROW_PORT = tmp_row;
+        MATRIX_COL_PORT = tmp_col; 
     }
 }
 
@@ -231,7 +228,7 @@ static uint8_t insert_hour_set(uint8_t* set, uint8_t hour){
     set[count++] = (hour % 12) + 1;
     set[count++] = 29;
 
-    if( hour > 12 ) {
+    if( hour >= 12 ) {
         set[count-1] = 30;
     }
 
@@ -318,12 +315,15 @@ static uint8_t insert_year_set(uint8_t* set, uint16_t year){
     return count;
 }
 
-static void init_LED_set(void){
+int main(void) {
 
-    LEDSetSize = insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
-}
+    init_timer0(); /* Multiplexer */
+    init_timer1(); /* Seconds Timer/Counter */
+    //init_timer2(); /* Unused */
 
-static void init_ports(void){
+    //init_ADC();
+    init_comparator();
+    init_PC_interrupts();
 
     // Set Multiplexing outputs as low
     MATRIX_COL_PORT &= 0xE0;
@@ -333,31 +333,19 @@ static void init_ports(void){
     MATRIX_COL_DDR |= 0x1F;
     MATRIX_ROW_DDR |= 0x3F;
 
-    //Set Speaker pin as an output and put the pin low 
+    // Set Speaker pin as an output and put the pin low 
     PIEZO_PORT &= ~(1 << PIEZO_PIN);
     PIEZO_DDR |= (1 << PIEZO_PIN);
 
-    //IR Receiver Pin Change Trigger
-    // Set IR Pin as inputs
+    // Set IR Pin as an input
     IR_DDR &= ~(1 << IR_PIN);
-}
 
-int main(void) {
+    // Fill the led set with the default time
+    LEDSetSize = insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
 
-    init_timer0(); /* Multiplexer */
-    init_timer1(); /* Tick Seconds */
-    init_timer2(); /* Misc IR/Optical Interceptor */
-
-    init_ADC();
-    init_comparator();
-    init_PC_interrupts();
-
-    init_ports();
-
-    init_LED_set();
-
+    // Enable Interrupts
     sei();
-
+    
     for ( ; ; ) asm("nop");
 
     return 0;
@@ -368,6 +356,12 @@ ISR(SOFT_INT0_vect){ }
 
 // Optical Comm Trigger
 ISR(ANALOG_COMP_vect){ 
+    
+    INVERT_PIN(PIEZO_PORT, PIEZO_PIN);
+
+    _delay_ms(25);
+
+    ACSR |= 1 << ACI;
 
     /*
      * ~~ -----+     +-----+          +---- ~~
@@ -377,55 +371,38 @@ ISR(ANALOG_COMP_vect){
      *         ^ANALOG_COMP_vect
      *                     ^ANALOG_COMP_vect
      */
-
-    IncomingDataPort = &ANALOG_COMP_PORT;
-    IncomingDataPin = ANALOG_COMP_PIN;
-
-    FIRE_SOFT_INT1(); /* e.g. IR_INCOMING_INT */
 }
 
 // ISR Triggered by IR_RECEIVER (PCINT8) || SOFT_INT1
 ISR(IR_INCOMING_INT){
 
-    // Disable PCINT8 Interrupt
-    // Don't won't another interrupt until buffer is full
-    PCICR &= ~(1 << PCIE1);
-
-    uint8_t bitBuffer = 0x00;
+    uint8_t bitBuffer = 0x0000;
 
     /* waste a few cycles here to sync with middle of level change */
-    _delay_us(700);
+    _delay_us(800);
 
     for( uint8_t bits = 0; bits < 8 ; bits++){
-
-        bitBuffer |= (PROBE_PIN(*IncomingDataPort, IncomingDataPin) << bits );
-        //bitBuffer |= (PORTC & 0x01) << bits;
-        
+        bitBuffer |= PROBE_PIN(IR_PORT, IR_PIN) << bits;
         _delay_us(1600);
     }
 
-    // Fire Packet Ready Software Interrupt 
     // TODO Consider Bottom Half Processing in main loop
     dispatch_command( bitBuffer );
 
-    IncomingDataPort = &IR_PORT;
-    IncomingDataPin = IR_PIN;
-
-    // Restore Pin Change interrupt
-    PCICR |= (1 << PCIE1);
+    PCIFR |= (1 << PCIF1);
 }
 
 // Software Interrupt 2
 ISR(SOFT_INT2_vect){ } 
 
-// 8-bit Timer0, Variable Freq
+// 8-bit Timer0
 ISR(TIMER0_OVF_vect){
 
     // Rotate LEDs (Multiplexing)
-    // TODO Note: HourSet on avg smaller than minute set may
-    // be brighter than minute configurations
+    
+    if(LEDSetPos == LEDSetSize) LEDSetPos = 0x0;
 
-    select_LED( LEDSet [ LEDSetPos++ % LEDSetSize ] );
+    select_LED( LEDSet [ LEDSetPos++ ] );
 
 }
 
@@ -435,7 +412,7 @@ ISR(TIMER1_COMPA_vect){
     /* update the tick count */
     tick_AVRTime(&AVRTime);
 
-    if( AVR_SEC(&AVRTime) == 0 )
+    if( AVR_SEC(&AVRTime) == 0 ) 
         LEDSetSize = insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
 
     /* compare the current time with the alarm time */ 
@@ -452,7 +429,6 @@ ISR(TIMER1_COMPA_vect){
     /* Trigger an adc conversion to handle auto dimming */
     trigger_ADC(LDR_ADC_CHANNEL);
 }
-
 
 // 8-bit Timer2
 ISR(TIMER2_COMPA_vect){ }

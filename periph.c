@@ -105,11 +105,12 @@ void init_timer0(void)
     //  1    1    0    External T0 pin failing edge
     //  1    1    1    External T0 pin rising edge
     
+
     // Normal Port operation
     TCCR0A = 0x00;
 
     // 256 Prescaler 
-    TCCR0B = (0<<CS02)|(1<<CS01)|(0<<CS00);
+    TCCR0B = (0<<CS02)|(1<<CS01)|(1<<CS00);
 
     // Use overflow interrupt
     TIMSK0 = (0<<OCIE0B)|(0<<OCIE0A)|(1<<TOIE0);
