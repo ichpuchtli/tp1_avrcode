@@ -45,8 +45,9 @@
 #define ANALOG_COMP_PIN         ACO 
 
 ///////////////////////////// LIGHT SENSOR ////////////////////////////////////
-#define LDR_ADC_CHANNEL         0   // PC2
-#define LIGHT_THRESHOLD         50  // Threshold Before Proportional Dimming
+#define LDR_ADC_CHANNEL         2    // PORTC2
+#define LDR_ADC_LIMIT           4000 // mV Voltage threshold before dimming
+#define LDR_ADC_SAMPLES         8    // Number of samples to take before average
 
 ///////////////////////////// PIEZO SPEAKER ///////////////////////////////////
 #define PIEZO_PORT              PORTC
@@ -87,11 +88,14 @@
 /* Returns 1 or 0 if pin is High or Low */
 #define PROBE_PIN(REG,PIN)     (REG & (1 << PIN)) 
 
+#define HIGH 0xFF
+#define LOW  0x00
+
 enum DISPLAY_MODES { M_TIME_DISP, M_DATE_DISP, M_ALARM_DISP, M_WEATHER_DISP };
 
 /* Initialize on board time */
-static struct AVRTime_t AVRTime = AVR_INIT_TIME(9,30,0);
-static struct AVRTime_t AVRAlarm;
+static struct AVRTime_t AVRTime = AVR_INIT_TIME(13,40,0);
+static struct AVRTime_t AVRAlarm = AVR_INIT_TIME(13,41,0);
 
 static volatile uint8_t AlarmOn = 0x00;
 static volatile uint8_t AlarmSet = 0x00;
@@ -103,15 +107,20 @@ static volatile uint8_t LEDSetPos  = 0x00;
 static volatile uint8_t CurrDispMode = M_TIME_DISP;
 static volatile uint8_t TotalDispModes = 0x04;
 
-static void select_LED(uint8_t diode){
+static volatile uint8_t DimmedMode = 0x00;
+static volatile uint16_t ADCSampleSum = 0;
+static volatile uint16_t ADCSamples = 0;
+static volatile uint16_t ADCAvgValue = 0;
 
-    if( diode == 0) return;
+static void select_LED(uint8_t diode){
 
     /* Calculate new row x col combination before changing port values,
      * introduce volatile qualifier to prevent unwanted optimisation
      */
     volatile uint8_t row = ~( 1 << ( ( diode - 1) % MATRIX_ROWS ) );
     volatile uint8_t col = 1 << ( ( diode - 1) / MATRIX_COLS);
+
+    if(diode == 0) col = 0;
 
     MATRIX_ROW_PORT = row;
     MATRIX_COL_PORT = col; 
@@ -315,9 +324,9 @@ int main(void) {
 
     init_timer0(); /* Multiplexer */
     init_timer1(); /* Seconds Timer/Counter */
-    //init_timer2(); /* Unused */
+    init_timer2(); /* Unused */
 
-    //init_ADC();
+    init_ADC();
     init_comparator();
     init_PC_interrupts();
 
@@ -353,7 +362,7 @@ ISR(SOFT_INT0_vect){ }
 /* Optical Comm Trigger */
 ISR(ANALOG_COMP_vect){ 
     
-    INVERT_PIN(PIEZO_PORT, PIEZO_PIN);
+    //INVERT_PIN(PIEZO_PORT, PIEZO_PIN);
 
     _delay_ms(25);
 
@@ -402,6 +411,9 @@ ISR(TIMER0_OVF_vect){
 
     /* Rotate LEDs (Multiplexing) */
     select_LED( LEDSet [ LEDSetPos++ ] );
+
+    /* Turn the LED off to reduce duty cycle */
+    if ( DimmedMode ) select_LED( 0 );
 }
 
 /* 16-bit Timer1, 1Hz */
@@ -415,30 +427,40 @@ ISR(TIMER1_COMPA_vect){
         LEDSetSize = insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
 
     /* Compare the current time with the alarm time */ 
-    if(AlarmSet && (comp_AVRTime(&AVRTime, &AVRAlarm) == 0) ){
-        AlarmOn = 255; /* Sound Alarm (Beep 255 Times) */
+    if(AlarmSet && !comp_AVRTime(&AVRTime, &AVRAlarm)){
+        AlarmOn = 8; /* Sound Alarm (Beep 4 Times) */
         AlarmSet = 0;
     }
-}
-
-/* 8-bit Timer2 */
-ISR(TIMER2_COMPA_vect){
 
     /* Sound the alarm */
     if(AlarmOn && AlarmOn--){
         INVERT_PIN(PIEZO_PORT,PIEZO_PIN);
     }
-
-    /* Trigger an ADC conversion to handle auto dimming */
-    trigger_ADC(LDR_ADC_CHANNEL);
 }
+
+/* 8-bit Timer2 */
+ISR(TIMER2_OVF_vect){
+
+    trigger_ADC(LDR_ADC_CHANNEL);
+} 
 
 /* 10-bit ADC value left adjusted */
 /* 8-bit precision with ADCH */
 ISR(ADC_vect) {
 
-    /* ADCH = Vin * 255 / VREF */
-    uint16_t voltage = (ADCH * 1100)/255;
+    /* volts = 0mV...5000mV */
+    uint16_t volts = ADCH * 20;
     
-    if(voltage < LIGHT_THRESHOLD);
+    ADCSampleSum += volts;
+
+    if( ++ADCSamples == LDR_ADC_SAMPLES ){
+        
+        ADCAvgValue = ADCSampleSum / ADCSamples;
+
+        ADCSamples = 0;
+        ADCSampleSum = 0;
+
+        DimmedMode = ( ADCAvgValue > LDR_ADC_LIMIT ) ? HIGH : LOW;
+    }
+
 }

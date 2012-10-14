@@ -43,7 +43,8 @@ void init_ADC(void){
     // ADCH = Vin * 1024 / VREF
     
     // Left adjust 10 bit ADC value just need to read ADCH 8-bit precision
-    ADMUX = (1<<REFS1)|(1<<REFS0)|(1<<ADLAR);
+    ADMUX = (0<<REFS1)|(1<<REFS0)|(1<<ADLAR);
+    ADMUX |= 2;
 
     // ADC Prescaler Selections
     // ADPS2 ADPS1 ADPS0 Division Factor
@@ -57,7 +58,7 @@ void init_ADC(void){
     //   1     1     1        128
     
     // Enable ADC, Enable Interrupt and 128 clk division factor
-    ADCSRA = (1<<ADEN)|(1<<ADSC)|(1<<ADIE)|(1<<ADPS2)|(1<<ADPS1)|(1<<ADPS0);
+    ADCSRA = (1<<ADEN)|(1<<ADSC)|(0<<ADATE)|(1<<ADIE)|(0<<ADPS2)|(0<<ADPS1)|(1<<ADPS0);
 
     // ADC Auto Trigger Sources
     // ADTS2 ADTS1 ADTS0 Trigger Source
@@ -74,7 +75,8 @@ void init_ADC(void){
     ADCSRB = (0<<ADTS2)|(0<<ADTS1)|(0<<ADTS0);
 
     // Disable all ADC
-    DIDR0 = (1<<ADC5D)|(1<<ADC4D)|(1<<ADC3D)|(1<<ADC2D)|(1<<ADC1D)|(1<<ADC0D);
+    DIDR0 = (1<<ADC5D)|(1<<ADC4D)|(1<<ADC3D)|(0<<ADC2D)|(1<<ADC1D)|(1<<ADC0D);
+
 }
 
 void trigger_ADC(uint8_t channel){
@@ -85,8 +87,7 @@ void trigger_ADC(uint8_t channel){
     // Enable Channel
     ADMUX  |= ( channel & 0x0F );
 
-    // Fire ADC Conversion
-    ADCSRA |= ( 1 << ADSC );
+    ADCSRA |= (1<<ADSC);
 }
 
 // 8bit Timer used to trigger ADC conversions
@@ -117,8 +118,6 @@ void init_timer0(void)
     
 }
 
-
-
 // 16bit Timer used to count seconds
 void init_timer1(void){
 
@@ -134,9 +133,14 @@ void init_timer1(void){
  
     // Freq = F_CPU / prescaler / OCR1A
 
-    OCR1AH = (unsigned char) ( (F_CPU / 1024) >> 8); 
-    OCR1AL = (unsigned char) (F_CPU / 1024);
+    OCR1AH = (unsigned char) ( (F_CPU / 1024) >> 8) + 1; 
 
+    /* Ideal */
+    /* OCR1AL = (unsigned char) (F_CPU / 1024); */
+
+    /* Actuall */
+    OCR1AL =  (unsigned char) 115;
+        
     // Normal Port operation
     TCCR1A = 0x00;
 
@@ -146,7 +150,6 @@ void init_timer1(void){
 
     // Don't need overflow or OCRB Compare match interrupt
     TIMSK1 = (0<<OCIE1B)|(1<<OCIE1A)|(0<<TOIE1);
-
 }
 
 void start_IR_interceptor(){
@@ -176,11 +179,11 @@ void init_timer2(void){
     //  1    1    0    clk/256
     //  1    1    1    clk/1024
    
+    // Normal port operation and enable CTC reset timer of OCR2A match
+    TCCR2A = 0x00;
+
     // 1024 prescaler, freq = F_CPU / 1024 / 256
     TCCR2B = (1<<CS22)|(1<<CS21)|(1<<CS20);
-
-    // Normal port operation and enable CTC reset timer of OCR2A match
-    TCCR2A = (1<<WGM21);
 
     // Use OCR2A Compare match interrupt
     TIMSK2 = (0<<OCIE2B)|(0<<OCIE2A)|(1<<TOIE2);

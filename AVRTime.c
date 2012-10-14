@@ -1,5 +1,11 @@
 #include "AVRTime.h" 
 
+#define __AVR_YEAR(TP)    ((int16_t) (TP)->years & 32767) 
+#define __AVR_DAY(TP)     ((int16_t) ((TP)->days & 32767) % 365)
+#define __AVR_HOUR(TP)    ((int16_t) ((TP)->hours & 32767) % 24)
+#define __AVR_MIN(TP)     ((int16_t) ((TP)->minutes & 32767) % 60)
+#define __AVR_SEC(TP)     ((int16_t) ((TP)->seconds & 32767) % 60)
+
 void init_AVRTime(struct AVRTime_t* stamp){
 
     stamp->years    = 0;
@@ -12,13 +18,11 @@ void init_AVRTime(struct AVRTime_t* stamp){
 
 int16_t comp_AVRTime(struct AVRTime_t* a, struct AVRTime_t* b){
     
-    if( AVR_YEAR(a) < AVR_YEAR(b) )      return -1;
-    if( AVR_YEAR(a) > AVR_YEAR(b) )      return 1;
-   
-    if( AVR_DAY(a) - AVR_DAY(b) )        return AVR_DAY(a) - AVR_DAY(b); 
-    if( AVR_HOUR(a) - AVR_HOUR(b) )      return AVR_HOUR(a) - AVR_HOUR(b);
-    if( AVR_MIN(a) - AVR_MIN(b) )        return AVR_MIN(a) - AVR_MIN(b);
-    if( AVR_SEC(a) - AVR_SEC(b) )        return AVR_SEC(a) - AVR_SEC(a);
+    if( __AVR_YEAR(a) - __AVR_YEAR(b) )   return __AVR_YEAR(a) - __AVR_YEAR(b); 
+    if( __AVR_DAY(a)  - __AVR_DAY(b) )    return __AVR_DAY(a)  - __AVR_DAY(b); 
+    if( __AVR_HOUR(a) - __AVR_HOUR(b) )   return __AVR_HOUR(a) - __AVR_HOUR(b);
+    if( __AVR_MIN(a)  - __AVR_MIN(b) )    return __AVR_MIN(a)  - __AVR_MIN(b);
+    if( __AVR_SEC(a)  - __AVR_SEC(b) )    return __AVR_SEC(a)  - __AVR_SEC(a);
     
     return 0;
 }
@@ -62,4 +66,3 @@ void tick_AVRTime(struct AVRTime_t* stamp){
 
     stamp->seconds++;
 }
-

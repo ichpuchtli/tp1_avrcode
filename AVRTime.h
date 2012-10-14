@@ -21,7 +21,7 @@
     AVR_DFL_SEC            \
 }
 
-#define AVR_INIT_TIME(HOUR,MINUTE,SECOND) { \
+#define AVR_INIT_TIME(HOUR,MINUTE,SECOND) {    \
     AVR_DFL_YEAR,                              \
     AVR_DFL_DAY,                               \
     HOUR,                                      \
