@@ -111,7 +111,7 @@ void init_timer0(void)
     TCCR0A = 0x00;
 
     // 256 Prescaler 
-    TCCR0B = (0<<CS02)|(1<<CS01)|(1<<CS00);
+    TCCR0B = (0<<CS02)|(1<<CS01)|(0<<CS00);
 
     // Use overflow interrupt
     TIMSK0 = (0<<OCIE0B)|(0<<OCIE0A)|(1<<TOIE0);
@@ -139,7 +139,7 @@ void init_timer1(void){
     /* OCR1AL = (unsigned char) (F_CPU / 1024); */
 
     /* Actuall */
-    OCR1AL =  (unsigned char) 115;
+    OCR1AL =  (unsigned char) 135;
         
     // Normal Port operation
     TCCR1A = 0x00;

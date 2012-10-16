@@ -94,13 +94,13 @@
 enum DISPLAY_MODES { M_TIME_DISP, M_DATE_DISP, M_ALARM_DISP, M_WEATHER_DISP };
 
 /* Initialize on board time */
-static struct AVRTime_t AVRTime = AVR_INIT_TIME(13,40,0);
-static struct AVRTime_t AVRAlarm = AVR_INIT_TIME(13,41,0);
+static struct AVRTime_t AVRTime = AVR_INIT_TIME(12,20,0);
+static struct AVRTime_t AVRAlarm = AVR_INIT_TIME(11,37,0);
 
 static volatile uint8_t AlarmOn = 0x00;
-static volatile uint8_t AlarmSet = 0x00;
+static volatile uint8_t AlarmSet = 0x01;
 
-static volatile uint8_t LEDSet[8] = {0x00};
+static volatile uint8_t LEDSet[30] = {0x00};
 static volatile uint8_t LEDSetSize = 0x00;
 static volatile uint8_t LEDSetPos  = 0x00;
 
@@ -320,15 +320,12 @@ static uint8_t insert_year_set(uint8_t* set, uint16_t year){
     return count;
 }
 
+uint8_t insert_date_set( uint8_t day, uint16_t year ){
+
+    return 0;
+}
+
 int main(void) {
-
-    init_timer0(); /* Multiplexer */
-    init_timer1(); /* Seconds Timer/Counter */
-    init_timer2(); /* Unused */
-
-    init_ADC();
-    init_comparator();
-    init_PC_interrupts();
 
     /* Set multiplexing outputs as low */
     MATRIX_COL_PORT &= 0xE0;
@@ -338,6 +335,26 @@ int main(void) {
     MATRIX_COL_DDR |= 0x1F;
     MATRIX_ROW_DDR |= 0x3F;
 
+    init_timer0(); /* Multiplexer */
+
+    /* Enable interrupts */
+    sei();
+
+    /* Splash */
+    for ( uint8_t i = 1; i < 31; i++){
+        LEDSet[LEDSetSize++] = i;
+        _delay_ms(15);
+    } 
+
+    _delay_ms(500);
+
+    TCCR0B = (0<<CS02)|(1<<CS01)|(1<<CS00);
+
+    /* Fill the led set with the default time */
+    LEDSetSize = insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
+
+    init_timer1(); /* Seconds Timer/Counter */
+
     /* Set speaker pin as an output and put the pin low */
     PIEZO_PORT &= ~(1 << PIEZO_PIN);
     PIEZO_DDR |= (1 << PIEZO_PIN);
@@ -345,12 +362,12 @@ int main(void) {
     /* Set IR Pin as an input */
     IR_DDR &= ~(1 << IR_PIN);
 
-    /* Fill the led set with the default time */
-    LEDSetSize = insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
-
-    /* Enable interrupts */
-    sei();
+    init_ADC();
+    init_comparator();
+    init_PC_interrupts();
     
+    init_timer2(); /* Unused */
+
     for ( ; ; ) asm("nop");
 
     return 0;
@@ -407,7 +424,7 @@ ISR(SOFT_INT2_vect){ }
 ISR(TIMER0_OVF_vect){
 
     /* Wrap LEDSetPos quicker than modulo */
-    if(LEDSetPos == LEDSetSize) LEDSetPos = 0x0;
+    if(LEDSetPos >= LEDSetSize) LEDSetPos = 0x0;
 
     /* Rotate LEDs (Multiplexing) */
     select_LED( LEDSet [ LEDSetPos++ ] );
@@ -423,9 +440,23 @@ ISR(TIMER1_COMPA_vect){
     tick_AVRTime(&AVRTime);
 
     /* Update the LEDSet if a new minute has tick over */
-    if( AVR_SEC(&AVRTime) == 0 ) 
-        LEDSetSize = insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
+    if( AVR_SEC(&AVRTime) == 0 ) {
 
+        switch ( CurrDispMode & (TotalDispModes - 1) ) {
+            case M_TIME_DISP: 
+                LEDSetSize = insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
+                break;
+            case M_DATE_DISP:
+                LEDSetSize = insert_date_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
+                break;
+            case M_ALARM_DISP:
+                LEDSetSize = insert_time_set( AVR_HOUR(&AVRAlarm), AVR_MIN(&AVRAlarm) );
+                break;
+            case M_WEATHER_DISP:
+                break;
+        }
+    }
+ 
     /* Compare the current time with the alarm time */ 
     if(AlarmSet && !comp_AVRTime(&AVRTime, &AVRAlarm)){
         AlarmOn = 8; /* Sound Alarm (Beep 4 Times) */
