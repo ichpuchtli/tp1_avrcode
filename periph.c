@@ -133,13 +133,13 @@ void init_timer1(void){
  
     // Freq = F_CPU / prescaler / OCR1A
 
-    OCR1AH = (unsigned char) ( (F_CPU / 1024) >> 8) + 1; 
+    OCR1AH = (unsigned char) ( ((F_CPU / 1024) >> 8) + 1 ); 
 
     /* Ideal */
     /* OCR1AL = (unsigned char) (F_CPU / 1024); */
 
     /* Actuall */
-    OCR1AL =  (unsigned char) 135;
+    OCR1AL =  (unsigned char) 16;
         
     // Normal Port operation
     TCCR1A = 0x00;

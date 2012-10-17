@@ -82,7 +82,7 @@ clean:
 
 flash: 
 	@make
-	@avrdude -F -e -y -c avrispmkii -p m88 -P usb -U flash:w:main.hex
+	@avrdude -F -B 1 -e -y -c avrispmkii -p m88 -P usb -U flash:w:main.hex
 
 ## Other dependencies
 -include $(shell mkdir dep 2>/dev/null) $(wildcard dep/*)
