@@ -94,7 +94,7 @@
 enum DISPLAY_MODES { M_TIME_DISP, M_DATE_DISP, M_ALARM_DISP, M_WEATHER_DISP };
 
 /* Initialize on board time */
-static struct AVRTime_t AVRTime = AVR_INIT_TIME(12,20,0);
+static struct AVRTime_t AVRTime = AVR_INIT_TIME(21,39,0);
 static struct AVRTime_t AVRAlarm = AVR_INIT_TIME(11,37,0);
 
 static volatile uint8_t AlarmOn = 0x00;
@@ -447,8 +447,18 @@ ISR(TIMER0_OVF_vect){
     /* Wrap LEDSetPos quicker than modulo */
     if(LEDSetPos >= LEDSetSize) LEDSetPos = 0x0;
 
-    /* Rotate LEDs (Multiplexing) */
-    select_LED( LEDSet [ LEDSetPos++ ] );
+    if (CurrDispMode != M_WEATHER_DISP) {
+        /* Rotate LEDs (Multiplexing) */
+        select_LED( LEDSet [ LEDSetPos++ ] );
+    } else {
+        // Problem with trying to change modes. 
+        // Takes a few presses of button.
+        PORTD = 0x0C;
+        PORTB = 0x00;
+        _delay_us(1000);
+        PORTD = 0x03;
+        PORTB = 0x15;
+    }
 
     /* Delay turning off the LED based on dimmness */
     switch( DimmedMode ) {
@@ -474,19 +484,15 @@ ISR(TIMER1_COMPA_vect){
 
     switch ( CurrDispMode & (TotalDispModes - 1) ) {
         case M_TIME_DISP:
-            /* Update the LEDSet if a new minute has ticked over */
-            if ( AVR_SEC(&AVRTime) == 0 ) {
-                LEDSetSize = insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
-            }
+            /* Update the LEDSet //if a new minute has ticked over */
+            LEDSetSize = insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
             break;
         case M_DATE_DISP:
-            /* Update the LEDSet if a new day has ticked over */
-            if ( AVR_HOUR(&AVRTime) == 0) {
-                LEDSetSize = insert_date_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
-            }
+            /* Update the LEDSet //if a new day has ticked over */
+            LEDSetSize = insert_date_set( AVR_DAY(&AVRTime), AVR_YEAR(&AVRTime) );
             break;
         case M_ALARM_DISP:
-            /* Update the LEDSet if a new minute has ticked over */
+            /* Update the LEDSet //if a new minute has ticked over */
             LEDSetSize = insert_time_set( AVR_HOUR(&AVRAlarm), AVR_MIN(&AVRAlarm) );
             break;
         case M_WEATHER_DISP:
