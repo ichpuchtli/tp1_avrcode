@@ -105,17 +105,18 @@ void init_timer0(void)
     //  1    0    1    clk/1024
     //  1    1    0    External T0 pin failing edge
     //  1    1    1    External T0 pin rising edge
-    
+
+    // ORC0A = 8000000 / 256 / 250
+    OCR0A = 125;
 
     // Normal Port operation
     TCCR0A = 0x00;
 
     // 256 Prescaler 
-    TCCR0B = (0<<CS02)|(1<<CS01)|(0<<CS00);
+    TCCR0B = (1<<CS02)|(0<<CS01)|(0<<CS00);
 
     // Use overflow interrupt
-    TIMSK0 = (0<<OCIE0B)|(0<<OCIE0A)|(1<<TOIE0);
-    
+    TIMSK0 = (0<<OCIE0B)|(1<<OCIE0A)|(0<<TOIE0);
 }
 
 // 16bit Timer used to count seconds

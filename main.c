@@ -42,8 +42,12 @@
 #define FIRE_SOFT_INT2()        INVERT_PIN(SOFT_INT2_PORT, SOFT_INT1_PIN)
 
 ///////////////////////////// ANALOG COMPARATOR ///////////////////////////////
-#define ANALOG_COMP_PORT        ACSR
-#define ANALOG_COMP_PIN         ACO 
+#define ACMP_PORT               ACSR
+#define ACMP_PIN                ACO 
+
+#define ACMP_WAITING            1
+#define ACMP_JIFF_DIFF          1  
+#define ACMP_FLASH_FREQ         40
 
 ///////////////////////////// LIGHT SENSOR ////////////////////////////////////
 #define ADC_CHANNEL             2     // PORTC2
@@ -122,6 +126,8 @@ static volatile int16_t DimLevel = 0x00;
 static volatile int16_t ADCSampleSum = 0x00;
 static volatile int16_t ADCSamples = 0x00;
 static volatile int16_t ADCAvgValue = 0x00;
+
+static volatile uint16_t Jiffies = 0;
 
 static volatile uint8_t WeatherForecast = M_WEATH_SUNNY;
 
@@ -469,31 +475,50 @@ ISR(IR_INCOMING_INT){
         prevBuf = buf;
     }
     
-    /* Clear interrupt flag to prevent recuring interrupts */
+    /* Clear interrupt flag to prevent recurring interrupts */
     PCIFR |= (1 << PCIF1);
 }
 
 /* Software Interrupt 2 */
-ISR(SOFT_INT2_vect){ } 
+ISR(SOFT_INT2_vect){
+
+    //bits = (Jiffies - lastJiffy) / ( 50 / 8 );
+    
+    //buffer |= ( (bits + 1) * (flipCount & 0x01 ) ) << ( remain - bits );
+
+    /*
+     * TWO OPTIONS TO INTERCEPT PACKETS
+     *
+     * 1. Count the Jiffies between consecutive ACMP interrupts and work
+     * out how many bits it has been high/low for, use soft interrupt so it can
+     * triggered internally after 12ms timeout.
+     *
+     * 2. On first ACMP interrupt start counting 10 lots of Jiffies and poll
+     * like IR. Screen flash frequency will have to be multiple of 4.
+     *
+     * 1.      |-40m-|-40m-|----80m----|
+     *
+     * 2.         |-40m-|-40m-|-40m-|-40m-|
+     * ~~ -----+     +-----+           +---- ~~
+     * ~~      |     |     |           |     ~~
+     * ~~      |_____|     |___________|     ~~
+     *
+     *         ^ANALOG_COMP_vect
+     *               ^ANALOG_COMP_vect
+     */
+
+} 
 
 /* Optical Comm Trigger */
 ISR(ANALOG_COMP_vect){ 
     
     //INVERT_PIN(PIEZO_PORT, PIEZO_PIN);
-
-    _delay_ms(25);
+    
+    FIRE_SOFT_INT2();
 
     ACSR |= 1 << ACI;
-
-    /*
-     * ~~ -----+     +-----+          +---- ~~
-     * ~~      |     |     |          |     ~~
-     * ~~      |_____|     |__________|     ~~
-     *
-     *         ^ANALOG_COMP_vect
-     *                     ^ANALOG_COMP_vect
-     */
 }
+
 /* 8-bit Timer0 */
 ISR(TIMER0_OVF_vect){
 
@@ -503,7 +528,7 @@ ISR(TIMER0_OVF_vect){
     /* Rotate LEDs (Multiplexing) */
     select_LED( LEDSet [ LEDSetPos++ ] );
 
-    /* Delay turning off the LED based on dimmness */
+    /* Delay turning off the LED based on dimness */
 
     if ( DimLevel > 0) {
 
@@ -553,7 +578,13 @@ ISR(TIMER1_COMPA_vect){
 }
 
 /* 8-bit Timer2 */
-ISR(TIMER2_OVF_vect){
+ISR(TIMER2_COMPA_vect){
+
+    Jiffies++; // 250Hz counter only good for ~4 minutes
+
+    // Incoming Packet Timeout
+    if ( ACMP_WAITING && (ACMP_JIFF_DIFF >= 3) )
+        FIRE_SOFT_INT2();
 
     trigger_ADC(ADC_CHANNEL);
 } 
