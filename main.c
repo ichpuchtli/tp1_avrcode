@@ -20,7 +20,8 @@
 #define MATRIX_COLS             0x06
 #define MATRIX_ROWS             0x06
 
-///////////////////////////// SOFTWARE INTERRUPTS ///////////////////////////// // PCIE0 => PCINT0..7 PORTB
+///////////////////////////// SOFTWARE INTERRUPTS ///////////////////////////// 
+//// PCIE0 => PCINT0..7 PORTB
 #define SOFT_INT0_PORT          PINB
 #define SOFT_INT0_PIN           6 // (PCINT6) 
 #define SOFT_INT0_vect          PCINT0_vect
@@ -45,10 +46,15 @@
 #define ANALOG_COMP_PIN         ACO 
 
 ///////////////////////////// LIGHT SENSOR ////////////////////////////////////
-#define LDR_ADC_CHANNEL         2    // PORTC2
-#define LDR_ADC_LIMIT           4000 // mV Voltage threshold before dimming
-#define LDR_ADC_SAMPLES         8    // Number of samples to take before average
+#define ADC_CHANNEL             2     // PORTC2
+#define ADC_SAMPLES             4     // Number of samples to take before average
+#define ADC_VREF                5000  // mV ADC Voltage Reference
+#define DIM_LEVEL_MAX         16    // total dimmness levels 
+#define DIM_START_LEVEL         2200  // mV Voltage for first  dimmness level
+#define DIM_LEVEL_DIFF          ( (ADC_VREF - DIM_START_LEVEL) / DIM_LEVEL_MAX )
 
+#define MAX_DELAY               2000 // useconds
+#define DIM_DELAY_US               (MAX_DELAY/DIM_LEVEL_MAX)
 ///////////////////////////// PIEZO SPEAKER ///////////////////////////////////
 #define PIEZO_PORT              PORTC
 #define PIEZO_DDR               DDRC
@@ -83,6 +89,11 @@
 #define IR_DEF_MUTE             0x4F
 #define IR_DEF_ENTER            0x46
 
+///////////////////////////// WEATHER INFORMATION /////////////////////////////
+#define SUNNY_SET_SIZE          12
+#define RAINY_SET_SIZE          11
+#define CLOUDY_SET_SIZE         9
+
 /* Invert the state of a pin low->high or high->low */
 #define INVERT_PIN(REG,PIN)    (REG ^= (1 << PIN))
 /* Returns 1 or 0 if pin is High or Low */
@@ -92,25 +103,27 @@
 #define LOW  0x00
 
 enum DISPLAY_MODES { M_TIME_DISP, M_DATE_DISP, M_ALARM_DISP, M_WEATHER_DISP };
+enum WEATHER_MODES { M_WEATH_SUNNY, M_WEATH_RAINY, M_WEATH_CLOUDY };
 
 /* Initialize on board time */
 static struct AVRTime_t AVRTime = AVR_INIT_TIME(21,39,0);
 static struct AVRTime_t AVRAlarm = AVR_INIT_TIME(11,37,0);
 
 static volatile uint8_t AlarmOn = 0x00;
-static volatile uint8_t AlarmSet = 0x01;
+static volatile uint8_t AlarmSet = 0x00;
 
 static volatile uint8_t LEDSet[30] = {0x00};
 static volatile uint8_t LEDSetSize = 0x00;
 static volatile uint8_t LEDSetPos  = 0x00;
 
 static volatile uint8_t CurrDispMode = M_TIME_DISP;
-static volatile uint8_t TotalDispModes = 0x04;
 
-static volatile int8_t DimmedMode = 0x00;
-static volatile uint16_t ADCSampleSum = 0;
-static volatile uint16_t ADCSamples = 0;
-static volatile uint16_t ADCAvgValue = 0;
+static volatile int16_t DimLevel = 0x00;
+static volatile int16_t ADCSampleSum = 0x00;
+static volatile int16_t ADCSamples = 0x00;
+static volatile int16_t ADCAvgValue = 0x00;
+
+static volatile uint8_t WeatherForecast = M_WEATH_SUNNY;
 
 static void select_LED(uint8_t diode){
 
@@ -126,114 +139,39 @@ static void select_LED(uint8_t diode){
     MATRIX_COL_PORT = col; 
 }
 
+static uint16_t mem_copy( uint8_t * dest, uint8_t * src, uint16_t size){
+
+    for(uint16_t i = 0; i < size; i++)
+        dest[i] = src[i];
+
+    return size;
+}
+
 static void null_space(uint8_t* buffer, uint16_t size){
 
     while(size--) *(size + buffer) = 0x00;
 }
 
-void process_num_stack(uint8_t* stack, uint8_t size){
+static void insert_weather_set(uint8_t forecast){
 
-    uint8_t hours, mins, secs;
-    uint16_t days, years; 
+    static uint8_t sunnySet[SUNNY_SET_SIZE] = { 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24};
+    static uint8_t cloudySet[CLOUDY_SET_SIZE] = { 13, 14, 24, 15, 23, 25, 26, 27, 28};
+    static uint8_t rainySet[RAINY_SET_SIZE] = {13, 14, 24, 15, 23, 25, 26, 27, 28, 29, 30};
 
-    switch( CurrDispMode & (TotalDispModes - 1) ){
+    switch( forecast ) {
 
-    case M_TIME_DISP:
-        /* Set Time */
-        hours = stack[0] * 10 + stack[1];
-        mins  = stack[2] * 10 + stack[3];
-        secs  = stack[4] * 10 + stack[5];
-
-        set_AVRTime_time(&AVRTime, hours, mins, secs);
-        break;
-
-    case M_DATE_DISP:
-        /* Set Date */
-        years = stack[0] * 1000 + stack[1] * 100 + stack[2] * 10 + stack[3];
-        days  = stack[4] * 100 + stack[5] * 10 + stack[6];
-
-        set_AVRTime_date(&AVRTime, years, days); 
-        break;
-
-    case M_ALARM_DISP:
-        /* Set Alarm Time */
-        hours = stack[0] * 10 + stack[1];
-        mins  = stack[2] * 10 + stack[3];
-        secs  = stack[4] * 10 + stack[5];
-
-        set_AVRTime_time(&AVRAlarm, hours, mins, secs);
-        break;
-
-    case M_WEATHER_DISP: 
-    default: break;
-
-    }
-}
-
-static void dispatch_command(uint8_t byte){
-    
-    int8_t num;
-
-    static uint8_t stack[10] = {0x00};
-    static uint8_t stackSize = 0x00;
-
-    num = -0x01;
-
-    switch ( byte ) {
-
-        case IR_DEF_0: num = 0x00; break;
-        case IR_DEF_1: num = 0x01; break;
-        case IR_DEF_2: num = 0x02; break;
-        case IR_DEF_3: num = 0x03; break;
-        case IR_DEF_4: num = 0x04; break;
-        case IR_DEF_5: num = 0x05; break;
-        case IR_DEF_6: num = 0x06; break;
-        case IR_DEF_7: num = 0x07; break;
-        case IR_DEF_8: num = 0x08; break;
-        case IR_DEF_9: num = 0x09; break;
-    }
-
-    if( num >= 0x00 ){
-        stack[stackSize++] = num;
-        return;
-    }
-
-    switch( byte ) {
-
-        /* Change clock to display time */
-        case IR_DEF_MENU:
-            CurrDispMode = M_TIME_DISP;
+        case M_WEATH_RAINY:
+            LEDSetSize = mem_copy( (void*) LEDSet, rainySet, RAINY_SET_SIZE);
             break;
 
-        /* Change clock to display date */
-        case IR_DEF_BUY:
-            CurrDispMode = M_DATE_DISP;
+        case M_WEATH_CLOUDY:
+            LEDSetSize = mem_copy( (void*) LEDSet, cloudySet, CLOUDY_SET_SIZE);
             break;
 
-        /* Change clock to display weather */
-        case IR_DEF_AB:
-            CurrDispMode = M_WEATHER_DISP;
+        default : case M_WEATH_SUNNY:
+            LEDSetSize = mem_copy( (void*) LEDSet, sunnySet, SUNNY_SET_SIZE);
             break;
-
-        /* Change clock to display alarm */
-        case IR_DEF_MUTE:
-            CurrDispMode = M_ALARM_DISP;
-            break;
-
-        /* Process the numbers collected depending on the current mode */
-        case IR_DEF_ENTER:
-            process_num_stack(stack,stackSize);
-            /* Fallthrough */
-            /* Reset number stack */
-        case IR_DEF_ONOFF:
-            null_space( stack, 10 );
-            stackSize = 0x00;
-            break;
-
-        default : break;
-
-    }
-
+    } 
 }
 
 static uint8_t insert_hour_set(uint8_t* set, uint8_t hour){
@@ -274,14 +212,14 @@ static uint8_t insert_minute_set(uint8_t* set, uint8_t minute){
 }
 
 
-static uint8_t insert_time_set(uint8_t hour, uint8_t min){
+static void insert_time_set(uint8_t hour, uint8_t min){
 
     uint8_t count = 0;
 
     count += insert_hour_set((uint8_t*) &LEDSet[count], hour);
     count += insert_minute_set((uint8_t*) &LEDSet[count], min);
 
-    return count;
+    LEDSetSize = count;
 }
 
 static uint8_t update_day_set(uint8_t* set, uint8_t day){
@@ -330,11 +268,125 @@ static uint8_t insert_year_set(uint8_t* set, uint16_t year){
     return count;
 }
 
-uint8_t insert_date_set( uint8_t day, uint16_t year ){
+void insert_date_set( uint8_t day, uint16_t year ){
 
-    return 0;
+    LEDSetSize = 0;
 }
 
+void process_num_stack(uint8_t* stack, uint8_t size){
+
+    uint8_t hours, mins, secs;
+    uint16_t days, years; 
+
+    switch( CurrDispMode ){
+
+    case M_TIME_DISP:
+        /* Set Time */
+        hours = stack[0] * 10 + stack[1];
+        mins  = stack[2] * 10 + stack[3];
+        secs  = stack[4] * 10 + stack[5];
+
+        set_AVRTime_time(&AVRTime, hours, mins, secs);
+        break;
+
+    case M_DATE_DISP:
+        /* Set Date */
+        years = stack[0] * 1000 + stack[1] * 100 + stack[2] * 10 + stack[3];
+        days  = stack[4] * 100 + stack[5] * 10 + stack[6];
+
+        set_AVRTime_date(&AVRTime, years, days); 
+        break;
+
+    case M_ALARM_DISP:
+        /* Set Alarm Time */
+        hours = stack[0] * 10 + stack[1];
+        mins  = stack[2] * 10 + stack[3];
+        secs  = stack[4] * 10 + stack[5];
+
+        set_AVRTime_time(&AVRAlarm, hours, mins, secs);
+        break;
+
+    case M_WEATHER_DISP: 
+        /* Select forecast mode from first number entered */
+        WeatherForecast = stack[0];
+        insert_weather_set(WeatherForecast);
+        break;
+
+    default: break;
+
+    }
+}
+
+static void dispatch_command(uint8_t byte){
+    
+    int8_t num;
+
+    static uint8_t stack[10] = {0x00};
+    static uint8_t stackSize = 0x00;
+
+    num = -0x01;
+
+    switch ( byte ) {
+
+        case IR_DEF_0: num = 0x00; break;
+        case IR_DEF_1: num = 0x01; break;
+        case IR_DEF_2: num = 0x02; break;
+        case IR_DEF_3: num = 0x03; break;
+        case IR_DEF_4: num = 0x04; break;
+        case IR_DEF_5: num = 0x05; break;
+        case IR_DEF_6: num = 0x06; break;
+        case IR_DEF_7: num = 0x07; break;
+        case IR_DEF_8: num = 0x08; break;
+        case IR_DEF_9: num = 0x09; break;
+    }
+
+    if( num >= 0x00 ){
+        stack[stackSize++] = num;
+        return;
+    }
+
+    switch( byte ) {
+
+        /* Change clock to display time */
+        case IR_DEF_MENU:
+            CurrDispMode = M_TIME_DISP;
+            insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
+            break;
+
+        /* Change clock to display date */
+        case IR_DEF_BUY:
+            CurrDispMode = M_DATE_DISP;
+            insert_date_set( AVR_DAY(&AVRTime), AVR_YEAR(&AVRTime) );
+            break;
+
+        /* Change clock to display weather */
+        case IR_DEF_AB:
+            CurrDispMode = M_WEATHER_DISP;
+            insert_weather_set(WeatherForecast);
+            break;
+ 
+        /* Change clock to display alarm */
+        case IR_DEF_MUTE:
+            CurrDispMode = M_ALARM_DISP;
+            insert_time_set( AVR_HOUR(&AVRAlarm), AVR_MIN(&AVRAlarm) );
+            break;
+
+        /* Process the numbers collected depending on the current mode */
+        case IR_DEF_ENTER:
+            process_num_stack(stack,stackSize);
+            /* Fallthrough */
+            /* Reset number stack */
+        case IR_DEF_ONOFF:
+            null_space( stack, 10 );
+            stackSize = 0x00;
+            break;
+
+
+        default : break;
+
+    }
+
+}
 int main(void) {
 
     /* Set multiplexing outputs as low */
@@ -376,10 +428,10 @@ int main(void) {
    
     init_timer2(); /* Unused */
 
-    _delay_ms(400);
+    _delay_ms(300);
 
     /* Fill the led set with the default time */
-    LEDSetSize = insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );    
+    insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );    
 
     init_timer1(); /* Seconds Timer/Counter */
 
@@ -388,27 +440,10 @@ int main(void) {
     return 0;
 }
 
+
 /* Software Interrupt 0 */
 ISR(SOFT_INT0_vect){ }
 
-/* Optical Comm Trigger */
-ISR(ANALOG_COMP_vect){ 
-    
-    //INVERT_PIN(PIEZO_PORT, PIEZO_PIN);
-
-    _delay_ms(25);
-
-    ACSR |= 1 << ACI;
-
-    /*
-     * ~~ -----+     +-----+          +---- ~~
-     * ~~      |     |     |          |     ~~
-     * ~~      |_____|     |__________|     ~~
-     *
-     *         ^ANALOG_COMP_vect
-     *                     ^ANALOG_COMP_vect
-     */
-}
 
 /* ISR Triggered by IR_RECEIVER (PCINT8) || SOFT_INT1 */
 ISR(IR_INCOMING_INT){
@@ -441,39 +476,43 @@ ISR(IR_INCOMING_INT){
 /* Software Interrupt 2 */
 ISR(SOFT_INT2_vect){ } 
 
+/* Optical Comm Trigger */
+ISR(ANALOG_COMP_vect){ 
+    
+    //INVERT_PIN(PIEZO_PORT, PIEZO_PIN);
+
+    _delay_ms(25);
+
+    ACSR |= 1 << ACI;
+
+    /*
+     * ~~ -----+     +-----+          +---- ~~
+     * ~~      |     |     |          |     ~~
+     * ~~      |_____|     |__________|     ~~
+     *
+     *         ^ANALOG_COMP_vect
+     *                     ^ANALOG_COMP_vect
+     */
+}
 /* 8-bit Timer0 */
 ISR(TIMER0_OVF_vect){
 
     /* Wrap LEDSetPos quicker than modulo */
     if(LEDSetPos >= LEDSetSize) LEDSetPos = 0x0;
 
-    if (CurrDispMode != M_WEATHER_DISP) {
-        /* Rotate LEDs (Multiplexing) */
-        select_LED( LEDSet [ LEDSetPos++ ] );
-    } else {
-        // Problem with trying to change modes. 
-        // Takes a few presses of button.
-        PORTD = 0x0C;
-        PORTB = 0x00;
-        _delay_us(1000);
-        PORTD = 0x03;
-        PORTB = 0x15;
-    }
+    /* Rotate LEDs (Multiplexing) */
+    select_LED( LEDSet [ LEDSetPos++ ] );
 
     /* Delay turning off the LED based on dimmness */
-    switch( DimmedMode ) {
-        case 4:
-            _delay_us(250);
-        case 3:
-            _delay_us(250);
-        case 2:
-            _delay_us(250);
-        case 1:
-            break;
-        default:
-            return;
+
+    if ( DimLevel > 0) {
+
+        int16_t delay = DIM_LEVEL_MAX - DimLevel;
+
+        while(delay--) _delay_us(DIM_DELAY_US);
+
+        select_LED( 0 );
     }
-    select_LED( 0 );
 }
 
 /* 16-bit Timer1, 1Hz */
@@ -482,21 +521,23 @@ ISR(TIMER1_COMPA_vect){
     /* Update the tick count */
     tick_AVRTime(&AVRTime);
 
-    switch ( CurrDispMode & (TotalDispModes - 1) ) {
-        case M_TIME_DISP:
-            /* Update the LEDSet //if a new minute has ticked over */
-            LEDSetSize = insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
-            break;
-        case M_DATE_DISP:
-            /* Update the LEDSet //if a new day has ticked over */
-            LEDSetSize = insert_date_set( AVR_DAY(&AVRTime), AVR_YEAR(&AVRTime) );
-            break;
-        case M_ALARM_DISP:
-            /* Update the LEDSet //if a new minute has ticked over */
-            LEDSetSize = insert_time_set( AVR_HOUR(&AVRAlarm), AVR_MIN(&AVRAlarm) );
-            break;
-        case M_WEATHER_DISP:
-            break;
+    if ( AVR_SEC(&AVRTime) == 0) {
+
+        switch ( CurrDispMode ) {
+
+            case M_TIME_DISP:
+                /* Update the LEDSet //if a new minute has ticked over */
+                insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
+                break;
+            case M_DATE_DISP:
+                /* Update the LEDSet //if a new day has ticked over */
+                insert_date_set( AVR_DAY(&AVRTime), AVR_YEAR(&AVRTime) );
+                break;
+            case M_ALARM_DISP:
+                /* Update the LEDSet //if a new minute has ticked over */
+                insert_time_set( AVR_HOUR(&AVRAlarm), AVR_MIN(&AVRAlarm) );
+                break;
+        }
     }
  
     /* Compare the current time with the alarm time */ 
@@ -514,7 +555,7 @@ ISR(TIMER1_COMPA_vect){
 /* 8-bit Timer2 */
 ISR(TIMER2_OVF_vect){
 
-    trigger_ADC(LDR_ADC_CHANNEL);
+    trigger_ADC(ADC_CHANNEL);
 } 
 
 /* 10-bit ADC value left adjusted */
@@ -526,25 +567,15 @@ ISR(ADC_vect) {
     
     ADCSampleSum += volts;
 
-    if( ++ADCSamples == LDR_ADC_SAMPLES ){
+    if( ++ADCSamples >= ADC_SAMPLES ){
         
         ADCAvgValue = ADCSampleSum / ADCSamples;
 
-        ADCSamples = 0;
+        ADCSamples   = 0;
         ADCSampleSum = 0;
+        DimLevel   = 0;
 
-        if (ADCAvgValue <= 2200){
-            DimmedMode = 0;
-        } else if (ADCAvgValue > 2200 && ADCAvgValue <= 2933){
-            DimmedMode = 4;
-        } else if (ADCAvgValue > 2933 && ADCAvgValue <= 3666){
-            DimmedMode = 3;
-        } else if (ADCAvgValue > 3666 && ADCAvgValue <= 4399){
-            DimmedMode = 2;
-        } else if (ADCAvgValue > 4399){
-            DimmedMode = 1;
-        }
-        
+        if ( ADCAvgValue > DIM_START_LEVEL ) 
+            DimLevel = (ADCAvgValue - DIM_START_LEVEL) / DIM_LEVEL_DIFF ;
     }
-
 }
