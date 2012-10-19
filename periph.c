@@ -106,17 +106,17 @@ void init_timer0(void)
     //  1    1    0    External T0 pin failing edge
     //  1    1    1    External T0 pin rising edge
 
-    // ORC0A = 8000000 / 256 / 250
-    OCR0A = 125;
+    OCR0A = 255;
 
     // Normal Port operation
     TCCR0A = 0x00;
 
     // 256 Prescaler 
-    TCCR0B = (1<<CS02)|(0<<CS01)|(0<<CS00);
+    TCCR0B = (0<<CS02)|(1<<CS01)|(0<<CS00);
 
     // Use overflow interrupt
     TIMSK0 = (0<<OCIE0B)|(1<<OCIE0A)|(0<<TOIE0);
+    
 }
 
 // 16bit Timer used to count seconds
@@ -153,17 +153,6 @@ void init_timer1(void){
     TIMSK1 = (0<<OCIE1B)|(1<<OCIE1A)|(0<<TOIE1);
 }
 
-void start_IR_interceptor(){
-
-    // OCR2A = F_CPU / prescaler / Freq / 2 
-    // OCR2A = 20000000 / 128 / 625 / 2
-    OCR2A =  100;
-
-    // 128 Prescaler in doing so supply timer with a clock source
-    // Start Timer2
-    TCCR2B = (1<<CS22)|(0<<CS21)|(1<<CS20);
-}
-
 // 8-bit timer used intercept IR Stream
 void init_timer2(void){
 
@@ -180,6 +169,9 @@ void init_timer2(void){
     //  1    1    0    clk/256
     //  1    1    1    clk/1024
    
+    // Freq = 125Hz
+    OCR2A = 250;
+
     // Normal port operation and enable CTC reset timer of OCR2A match
     TCCR2A = 0x00;
 
@@ -187,6 +179,6 @@ void init_timer2(void){
     TCCR2B = (1<<CS22)|(1<<CS21)|(1<<CS20);
 
     // Use OCR2A Compare match interrupt
-    TIMSK2 = (0<<OCIE2B)|(0<<OCIE2A)|(1<<TOIE2);
+    TIMSK2 = (0<<OCIE2B)|(1<<OCIE2A)|(0<<TOIE2);
 }
 
