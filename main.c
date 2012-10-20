@@ -12,10 +12,10 @@
 #include "AVRTime.h"
 
 ///////////////////////////// MULTIPLEXING ////////////////////////////////////
-#define MATRIX_COL_PORT         PORTD /* PORTD0..4*/
-#define MATRIX_ROW_PORT         PORTB /* PORTB0..5*/
-#define MATRIX_COL_DDR          DDRD /* PORTD0..4*/
-#define MATRIX_ROW_DDR          DDRB /* PORTD0..5*/
+#define MATRIX_COL_PORT         PORTD /* PORTD0..4 */
+#define MATRIX_ROW_PORT         PORTB /* PORTB0..5 */
+#define MATRIX_COL_DDR          DDRD  /* PORTD0..4 */
+#define MATRIX_ROW_DDR          DDRB  /* PORTD0..5 */
 
 #define MATRIX_COLS             0x06
 #define MATRIX_ROWS             0x06
@@ -33,32 +33,46 @@
 #define SOFT_INT1_vect          PCINT1_vect
 
 /* PCIE2 => PCINT016..23 PORTD*/
+/* TODO Unable to use due to overlapping pin registrations */
+#if 0
 #define SOFT_INT2_PORT          PIND
-#define SOFT_INT2_PIN           5 /* (PCINT21)*/
+#define SOFT_INT2_PIN           5  /* (PCINT21) */
 #define SOFT_INT2_vect          PCINT2_vect
-
-#define FIRE_SOFT_INT0()        INVERT_PIN(SOFT_INT0_PORT, SOFT_INT0_PIN)
-#define FIRE_SOFT_INT1()        INVERT_PIN(SOFT_INT1_PORT, SOFT_INT1_PIN)
-#define FIRE_SOFT_INT2()        INVERT_PIN(SOFT_INT2_PORT, SOFT_INT1_PIN)
+#endif
 
 ///////////////////////////// ANALOG COMPARATOR ///////////////////////////////
 #define ACMP_PORT               ACSR
 #define ACMP_PIN                ACO 
 
-#define ACMP_WAITING            1
-#define ACMP_JIFF_DIFF          1  
-#define ACMP_FLASH_FREQ         40
+#define JIFFY_DIFF              8     /* mseconds period = 1000 / (F_CPU/256/OCR) */
+#define ACMP_FLASH_DELAY        80    /* mseconds flash period */
+
+#define ACMP_PKT_INBOUND        (!PROBE_PIN(ACSR,ACIE))
+#define ACMP_ENABLE()           SET_PIN_HIGH(ACSR,ACIE)
+#define ACMP_DISABLE()          SET_PIN_LOW(ACSR,ACIE)
+
+#if 0
+#define ACMP_PKT_INBOUND        (!Enabled)
+#define ACMP_ENABLE()           (Enabled = 0) 
+#define ACMP_DISABLE()          do {            \
+    if( Enabled ) { Enabled = 0;}  \
+    else {SET_PIN_HIGH(ACSR,ACI); return;} \
+}while(0)
+#endif
+
+#define ACMP_PULSE_WIDTH        (ACMP_FLASH_DELAY/JIFFY_DIFF) /* jiffies */
 
 ///////////////////////////// LIGHT SENSOR ////////////////////////////////////
 #define ADC_CHANNEL             2     /* PORTC2*/
 #define ADC_SAMPLES             4     /* Number of samples to take before average*/
 #define ADC_VREF                5000  /* mV ADC Voltage Reference*/
-#define DIM_LEVEL_MAX           16    /* total dimmness levels */
+#define DIM_LEVEL_MAX           8    /* total dimmness levels */
 #define DIM_START_LEVEL         3400  /* mV Voltage for first  dimmness level*/
-#define DIM_LEVEL_DIFF          100   /* ((ADC_VREF - DIM_START_LEVEL) / DIM_LEVEL_MAX) */
+#define DIM_LEVEL_DIFF          200   /* ((ADC_VREF - DIM_START_LEVEL) / DIM_LEVEL_MAX) */
 
-#define MAX_DELAY               1000 /* useconds*/
+#define MAX_DELAY               800 /* useconds*/
 #define DIM_DELAY_US            (MAX_DELAY/DIM_LEVEL_MAX)
+
 ///////////////////////////// PIEZO SPEAKER ///////////////////////////////////
 #define PIEZO_PORT              PORTC
 #define PIEZO_DDR               DDRC
@@ -102,10 +116,22 @@
 #define M_WEATH_RAINY           1
 #define M_WEATH_CLOUDY          2
 
+///////////////////////////// DEBUG PINS //////////////////////////////////////
+#define DEBUG0_PORT              PORTB
+#define DEBUG0_DDR               DDRB
+#define DEBUG0_PIN               5 
+
+#define DEBUG1_PORT              PORTB
+#define DEBUG1_DDR               DDRB
+#define DEBUG1_PIN               4 
+
 /* Invert the state of a pin low->high or high->low */
 #define INVERT_PIN(REG,PIN)    (REG ^= (1 << PIN))
 /* Returns 1 or 0 if pin is High or Low */
 #define PROBE_PIN(REG,PIN)     (REG & (1 << PIN)) 
+
+#define SET_PIN_HIGH(REG,PIN)  (REG |= (1 << PIN))
+#define SET_PIN_LOW(REG,PIN)   (REG &= ~(1 << PIN))
 
 enum DISPLAY_MODES { M_TIME_DISP, M_DATE_DISP, M_ALARM_DISP, M_WEATHER_DISP };
 
@@ -113,23 +139,20 @@ enum DISPLAY_MODES { M_TIME_DISP, M_DATE_DISP, M_ALARM_DISP, M_WEATHER_DISP };
 static struct AVRTime_t AVRTime = AVR_INIT_TIME(0,0,0);
 static struct AVRTime_t AVRAlarm = AVR_INIT_TIME(0,0,0);
 
-static volatile uint8_t AlarmOn = 0x00;
 static volatile uint8_t AlarmSet = 0x00;
 
 static volatile uint8_t LEDSet[30] = {0x00};
 static volatile uint8_t LEDSetSize = 0x00;
-static volatile uint8_t LEDSetPos  = 0x00;
 
 static volatile uint8_t CurrDispMode = M_TIME_DISP;
-
 static volatile int16_t DimLevel = 0x00;
-static volatile int16_t ADCSampleSum = 0x00;
-static volatile int16_t ADCSamples = 0x00;
-static volatile int16_t ADCAvgValue = 0x00;
 
-static volatile uint16_t Jiffies = 0;
+static volatile int16_t Jiffies = 0x0000; 
+static volatile int16_t NextPollEvent = 0x0000;
 
 static volatile uint8_t WeatherForecast = M_WEATH_SUNNY;
+
+static volatile uint8_t FirstEdge = 0x01;
 
 static void select_LED(uint8_t diode){
 
@@ -425,13 +448,15 @@ void init_ports(void){
     MATRIX_COL_DDR |= 0x1F;
     MATRIX_ROW_DDR |= 0x3F;
 
+    //SET_PIN_HIGH(DEBUG0_DDR,DEBUG0_PIN);
+    //SET_PIN_HIGH(DEBUG1_DDR,DEBUG1_PIN);
+
     /* Set speaker pin as an output and put the pin low */
-    PIEZO_PORT &= ~(1 << PIEZO_PIN);
-    PIEZO_DDR |= (1 << PIEZO_PIN);
+    SET_PIN_LOW(PIEZO_PORT,PIEZO_PIN);
+    SET_PIN_HIGH(PIEZO_DDR,PIEZO_PIN);
 
     /* Set IR Pin as an input */
-    IR_DDR &= ~(1 << IR_PIN);
-
+    SET_PIN_LOW(IR_DDR,IR_PIN);
 }
 
 int main(void) {
@@ -460,10 +485,80 @@ int main(void) {
     return 0;
 }
 
+void poll(void){
 
+    /*
+     * On first ACMP interrupt setup up jiffy delta to fire an interrupt to poll
+     * like IR. Screen flash frequency will have to be multiple of 8.
+     *
+     *            |-40m-|-40m-|-40m-|-40m-|
+     * ~~ -----+     +-----+           +---- ~~
+     * ~~      |     |     |           |     ~~
+     * ~~      |_____|     |___________|     ~~
+     *
+     *         ^ANALOG_COMP_vect
+     */
+
+    static uint8_t byte = 0x00;
+    static int8_t bits = 0x08;
+
+    bits--;
+
+    if( bits >= 0 ){
+
+        byte |= ( ((ACMP_PORT & (1 << ACMP_PIN)) >> ACMP_PIN) << bits );
+
+        return;
+    }
+
+    /* Dispatch Command */
+    dispatch_command( byte );
+
+    bits = 0x08;
+    byte = 0x00;
+
+    /* Enable Analog Compare vector */
+    //ACMP_ENABLE();
+    FirstEdge = 1;
+}
 /* Software Interrupt 0 */
-ISR(SOFT_INT0_vect){ }
+ISR(SOFT_INT0_vect){
+#if 0
+    /*
+     * On first ACMP interrupt setup up jiffy delta to fire an interrupt to poll
+     * like IR. Screen flash frequency will have to be multiple of 8.
+     *
+     *            |-40m-|-40m-|-40m-|-40m-|
+     * ~~ -----+     +-----+           +---- ~~
+     * ~~      |     |     |           |     ~~
+     * ~~      |_____|     |___________|     ~~
+     *
+     *         ^ANALOG_COMP_vect
+     */
 
+    static uint8_t byte = 0x00;
+    static int8_t bits = 0x08;
+
+    bits--;
+
+    if( bits >= 0 ){
+
+        byte |= PROBE_PIN(ACMP_PORT,ACMP_PIN) << bits;
+
+        return;
+    }
+
+    /* Dispatch Command */
+    dispatch_command( byte );
+
+    bits = 0x08;
+    byte = 0x00;
+
+    /* Enable Analog Compare vector */
+    //ACMP_ENABLE();
+    FirstEdge = 1;
+#endif
+}
 
 /* ISR Triggered by IR_RECEIVER (PCINT8) || SOFT_INT1 */
 ISR(IR_INCOMING_INT){
@@ -482,7 +577,7 @@ ISR(IR_INCOMING_INT){
 
         _delay_us(1600);
 
-        INVERT_PIN(PIEZO_PORT,PIEZO_PIN);
+        //INVERT_PIN(PIEZO_PORT,PIEZO_PIN);
     }
     
     if (prevbyte == byte) { /* Second Pulse*/
@@ -496,70 +591,46 @@ ISR(IR_INCOMING_INT){
     }
     
     /* Clear interrupt flag to prevent recuring interrupts */
-    PCIFR |= (1 << PCIF1);
+    SET_PIN_HIGH(PCIFR, PCIF1);
 }
-
-/* Software Interrupt 2 */
-ISR(SOFT_INT2_vect){
-
-    /*bits = (Jiffies - lastJiffy) / ( 50 / 8 );*/
-    
-    /*buffer |= ( (bits + 1) * (flipCount & 0x01 ) ) << ( remain - bits );*/
-
-    /*
-     * TWO OPTIONS TO INTERCEPT PACKETS
-     *
-     * 1. Count the Jiffies between consecutive ACMP interrupts and work
-     * out how many bits it has been high/low for, use soft interrupt so it can
-     * triggered internally after 12ms timeout.
-     *
-     * 2. On first ACMP interrupt start counting 10 lots of Jiffies and poll
-     * like IR. Screen flash frequency will have to be multiple of 4.
-     *
-     * 1.      |-40m-|-40m-|----80m----|
-     *
-     * 2.         |-40m-|-40m-|-40m-|-40m-|
-     * ~~ -----+     +-----+           +---- ~~
-     * ~~      |     |     |           |     ~~
-     * ~~      |_____|     |___________|     ~~
-     *
-     *         ^ANALOG_COMP_vect
-     *               ^ANALOG_COMP_vect
-     */
-
-} 
 
 /* Optical Comm Trigger */
 ISR(ANALOG_COMP_vect){ 
     
-    /*INVERT_PIN(PIEZO_PORT, PIEZO_PIN);*/
-
-    FIRE_SOFT_INT2();
-
+    //INVERT_PIN(DEBUG0_PORT,DEBUG0_PIN);
+    
     _delay_ms(2);
 
-    ACSR |= 1 << ACI;
+    /* Disable Analog Compare vectors */
+    //ACMP_DISABLE();
 
-    /*
-     * ~~ -----+     +-----+          +---- ~~
-     * ~~      |     |     |          |     ~~
-     * ~~      |_____|     |__________|     ~~
-     *
-     *         ^ANALOG_COMP_vect
-     *                     ^ANALOG_COMP_vect
-     */
+    if( FirstEdge ){
+        
+        FirstEdge = 0;
+
+        /* Reset Jiffie Count */
+        Jiffies = 0x0000;
+        
+        /* Queue next poll event in half a "pulse width" from now  */
+        NextPollEvent = Jiffies + ACMP_PULSE_WIDTH/2;
+    }
+
+    /* Prevent Queued Interrupt */
+    SET_PIN_HIGH(ACSR,ACI);
 }
+
 /* 8-bit Timer0,  */
 ISR(TIMER0_COMPA_vect){
+
+    static volatile uint8_t LEDSetPos  = 0x00;
 
     /* Wrap LEDSetPos quicker than modulo */
     if(LEDSetPos >= LEDSetSize) LEDSetPos = 0x0;
 
     /* Rotate LEDs (Multiplexing) */
-    select_LED( LEDSet [ LEDSetPos++ ] );
+    if(LEDSetSize > 0) select_LED( LEDSet [ LEDSetPos++ ] );
 
     /* Delay turning off the LED based on dimmness */
-
     if ( DimLevel > 0) {
 
         int16_t delay = DIM_LEVEL_MAX - DimLevel;
@@ -573,6 +644,8 @@ ISR(TIMER0_COMPA_vect){
 
 /* 16-bit Timer1, 1Hz */
 ISR(TIMER1_COMPA_vect){ 
+
+    static volatile uint8_t AlarmOn = 0x00;
 
     /* Update the tick count */
     tick_AVRTime(&AVRTime);
@@ -597,8 +670,10 @@ ISR(TIMER1_COMPA_vect){
     }
  
     /* Compare the current time with the alarm time */ 
-    if(AlarmSet && !comp_AVRTime(&AVRTime, &AVRAlarm))
+    if(AlarmSet && !comp_AVRTime(&AVRTime, &AVRAlarm)){
         AlarmOn = 8; /* Sound Alarm (Beep 4 Times) */
+        AlarmSet = 0;
+    }
 
     /* Sound the alarm */
     if(AlarmOn && AlarmOn--)
@@ -610,12 +685,34 @@ ISR(TIMER2_COMPA_vect){
 
     Jiffies++;
 
+    /* Cap at +16383 to prevent overflow during addition and subtraction.*/
+    //Jiffies &= ((1 << 14) - 1);
+
+    if( FirstEdge == 0 ) {
+
+        /* New Poll Event, Time to POLL Analog Comparator */
+        if( (NextPollEvent - Jiffies) <= 0){
+
+            /* Queue Software Interrupt 0, to handle polling */
+            //INVERT_PIN(SOFT_INT0_PORT, SOFT_INT0_PIN);
+
+            poll();
+
+            /* Queue next poll event in one "pulse width" from now */
+            NextPollEvent = Jiffies + ACMP_PULSE_WIDTH;
+        }
+    }
+
     trigger_ADC(ADC_CHANNEL);
 } 
 
 /* 10-bit ADC value left adjusted */
 /* 8-bit precision with ADCH */
 ISR(ADC_vect) {
+
+    static int16_t ADCSampleSum = 0x00;
+    static int16_t ADCSamples = 0x00;
+    static int16_t ADCAvgValue = 0x00;
 
     /* volts = 0mV...5000mV */
     uint16_t volts = ADCH * 20;
@@ -631,6 +728,6 @@ ISR(ADC_vect) {
         DimLevel     = 0;
 
         if ( ADCAvgValue > DIM_START_LEVEL ) 
-            DimLevel = (ADCAvgValue - DIM_START_LEVEL) / DIM_LEVEL_DIFF ;
+            DimLevel = (ADCAvgValue - DIM_START_LEVEL) / DIM_LEVEL_DIFF;
     }
 }

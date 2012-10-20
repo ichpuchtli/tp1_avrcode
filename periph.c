@@ -18,7 +18,7 @@ void init_PC_interrupts(void){
 void init_comparator(void){
 
     // Fire Interrupt on Rising Edge
-    ACSR = (0 << ACO) | (1 << ACIE) | (1 << ACIS1) | (1 << ACIS0);  
+    ACSR = (0 << ACO) | (1 << ACIE) | (0 << ACIS1) | (0 << ACIS0);  
 
     DIDR1 = (0 << AIN1D) | (0 << AIN0D);
 
@@ -176,7 +176,7 @@ void init_timer2(void){
     TCCR2A = 0x00;
 
     // 1024 prescaler, freq = F_CPU / 1024 / 256
-    TCCR2B = (1<<CS22)|(1<<CS21)|(1<<CS20);
+    TCCR2B = (1<<CS22)|(1<<CS21)|(0<<CS20);
 
     // Use OCR2A Compare match interrupt
     TIMSK2 = (0<<OCIE2B)|(1<<OCIE2A)|(0<<TOIE2);
