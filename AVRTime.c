@@ -6,6 +6,22 @@
 #define __AVR_MIN(TP)     ((int16_t) ((TP)->minutes & 32767) % 60)
 #define __AVR_SEC(TP)     ((int16_t) ((TP)->seconds & 32767) % 60)
 
+
+uint8_t MAX_DAYS[12] = {
+   DAYS_IN_JAN,
+   DAYS_IN_FEB,
+   DAYS_IN_MAR,
+   DAYS_IN_APR,
+   DAYS_IN_MAY,
+   DAYS_IN_JUN,
+   DAYS_IN_JUL,
+   DAYS_IN_AUG,
+   DAYS_IN_SEP,
+   DAYS_IN_OCT,
+   DAYS_IN_NOV,
+   DAYS_IN_DEC
+};
+
 void init_AVRTime(struct AVRTime_t* stamp){
 
     stamp->years    = 0;
@@ -66,3 +82,73 @@ void tick_AVRTime(struct AVRTime_t* stamp){
 
     stamp->seconds++;
 }
+
+static void check_leap_year(uint16_t year){
+
+    MAX_DAYS[1] = ( (year & 3) == 0 ) ? 29 : 28;
+}
+
+uint16_t get_AVRTime_day(uint8_t day_of_month, uint8_t month, uint16_t year){
+
+    uint16_t days = 0;
+
+    check_leap_year(year);
+    
+    while(month--) days += MAX_DAYS[month];
+
+    return days + day_of_month;
+}
+
+uint8_t get_AVRTime_dayofmonth(int16_t bulk_days){
+
+    uint8_t month = 0; 
+
+    while( bulk_days > MAX_DAYS[month] ) 
+        bulk_days -= MAX_DAYS[month++];
+
+    return bulk_days;
+}
+
+uint8_t get_AVRTime_month(int16_t bulk_day, uint16_t year){
+
+    uint8_t month = 0;
+
+    check_leap_year(year);
+
+    for ( ; ; ) {
+    
+        bulk_day -= MAX_DAYS[month++];
+
+        if(bulk_day <= 0) break;
+    }
+
+    return month;
+}
+
+static int8_t valid_day(uint8_t day_of_month){
+    
+    return (day_of_month > 0) && (day_of_month <= 31);
+}
+
+static int8_t valid_month(uint8_t month){
+
+    return (month > 0) && (month <= 12);
+}
+
+static int8_t valid_year(uint16_t year){
+
+    return (year >= 0) && (year <= 9999);
+
+}
+
+int8_t check_AVRTime_date(uint8_t day_of_month, uint8_t month, uint16_t year){
+
+    if( !valid_day(day_of_month) || !valid_month(month) || !valid_year(year) ) {
+        return 0;
+    }
+    
+    check_leap_year(year);
+
+    return day_of_month <= MAX_DAYS[month];
+}
+

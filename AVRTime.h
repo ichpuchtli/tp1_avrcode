@@ -1,5 +1,18 @@
 #include <avr/io.h>
 
+#define DAYS_IN_JAN       31
+#define DAYS_IN_FEB       28  /* 29 on leap year 28 non leap year */
+#define DAYS_IN_MAR       31
+#define DAYS_IN_APR       30
+#define DAYS_IN_MAY       31
+#define DAYS_IN_JUN       30
+#define DAYS_IN_JUL       31
+#define DAYS_IN_AUG       31
+#define DAYS_IN_SEP       30
+#define DAYS_IN_OCT       31
+#define DAYS_IN_NOV       30
+#define DAYS_IN_DEC       31
+
 #define AVR_YEAR(TP)    ((TP)->years)
 #define AVR_DAY(TP)     ((TP)->days % 365)
 #define AVR_HOUR(TP)    ((TP)->hours % 24)
@@ -7,8 +20,8 @@
 #define AVR_SEC(TP)     ((TP)->seconds % 60)
 
 /* Initial starting time 9:30am,1st January, 2012 */
-#define AVR_DFL_YEAR 2012
-#define AVR_DFL_DAY  1
+#define AVR_DFL_YEAR 1991
+#define AVR_DFL_DAY  139 
 #define AVR_DFL_HOUR 13
 #define AVR_DFL_MIN  0 
 #define AVR_DFL_SEC  0
@@ -52,3 +65,9 @@ void tick_AVRTime(struct AVRTime_t* stamp);
 
 void set_AVRTime_time(struct AVRTime_t* stamp, uint8_t hours, uint8_t mins, uint8_t secs);
 void set_AVRTime_date(struct AVRTime_t* stamp, uint16_t years, uint16_t days);
+
+uint16_t get_AVRTime_day(uint8_t day_of_month, uint8_t month, uint16_t year);
+uint8_t get_AVRTime_month(int16_t bulk_day, uint16_t year); 
+
+int8_t check_AVRTime_date(uint8_t day_of_month, uint8_t month, uint16_t year);
+uint8_t get_AVRTime_dayofmonth(int16_t bulk_days);

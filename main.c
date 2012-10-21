@@ -251,62 +251,53 @@ static void insert_time_set(uint8_t hour, uint8_t min){
     LEDSetSize = count;
 }
 
-static uint8_t update_day_set(uint8_t* set, uint8_t day){
+static void insert_day_set(uint8_t day){
 
-    uint8_t count = 0;
+    LEDSetSize = 0;
 
-    set[count++] = 25;
-    set[count++] = (day % 10) + 1;
-    set[count++] = (day / 10) + 13;
+    LEDSet[LEDSetSize++] = 25;
+    LEDSet[LEDSetSize++] = (day % 10) + 1;
+    LEDSet[LEDSetSize++] = (day / 10) + 13;
 
-    return count;
 }
 
-static uint8_t update_month_set(uint8_t* set, uint8_t month){
+static void insert_month_set(uint8_t month){
 
-    uint8_t count = 0;
-
-    set[count++] = 26;
-    set[count++] = (month % 12) + 1;
-
-    return count;
+    LEDSetSize = 0;
+    
+    LEDSet[LEDSetSize++] = 26;
+    LEDSet[LEDSetSize++] = (month % 12) + 1;
+    LEDSet[LEDSetSize++] = (month / 10) + 13;
 }
 
-static uint8_t insert_year_set(uint8_t* set, uint16_t year){
-
-    uint8_t count = 0;
+static void insert_year_set(uint16_t year){
 
     uint8_t start, end;    
+
+    LEDSetSize = 0;
+
+    LEDSet[LEDSetSize++] = 27;
 
     start = year / 1000 + 1;
     end   = start + ( ( year / 100 ) % 10 );
 
-    for( uint8_t i = start; i <= end; i++){
-
-        set[count++] = i % 12;
-    }
+    for( uint8_t i = start; i <= end; i++)
+        LEDSet[LEDSetSize++] = i % 12;
 
     start = (year % 100)/10;
     end = start + year % 10;
 
-    for( uint8_t i = start; i <= end; i++){
-
-        set[count++] = i % 12 + 12;
-    }
-
-    return count;
+    for( uint8_t i = start; i <= end; i++) 
+        LEDSet[LEDSetSize++] = i % 12 + 12;
 }
 
-void insert_date_set( uint8_t day, uint16_t year ){
-
-    LEDSetSize = 0;
-}
 
 void process_num_stack(uint8_t* stack, uint8_t size){
 
     uint8_t hours, mins, secs;
-    uint16_t days, years; 
+    uint16_t days, months, years;
 
+    /* Switch on the current display mode to update required structures */
     switch( CurrDispMode ){
 
     case M_TIME_DISP:
@@ -314,18 +305,21 @@ void process_num_stack(uint8_t* stack, uint8_t size){
         hours = stack[0] * 10 + stack[1];
         mins  = stack[2] * 10 + stack[3];
         secs  = stack[4] * 10 + stack[5];
-
+    
         set_AVRTime_time(&AVRTime, hours, mins, secs);
-        insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
         break;
 
     case M_DATE_DISP:
         /* Set Date */
-        years = stack[0] * 1000 + stack[1] * 100 + stack[2] * 10 + stack[3];
-        days  = stack[4] * 100 + stack[5] * 10 + stack[6];
+        days = stack[0] * 10 + stack[1];
+        months = stack[2] * 10 + stack[3];
+        years = stack[4] * 1000 + stack[5] * 100 + stack[6] * 10 + stack[7];
 
-        set_AVRTime_date(&AVRTime, years, days); 
-        insert_date_set( AVR_DAY(&AVRTime), AVR_YEAR(&AVRTime) );
+        //if ( !check_AVRTime_date(days, months, years) ) break;
+        
+        days = get_AVRTime_day(days, months, years);
+
+        set_AVRTime_date(&AVRTime, days, years); 
         break;
 
     case M_ALARM_DISP:
@@ -335,20 +329,39 @@ void process_num_stack(uint8_t* stack, uint8_t size){
         secs  = stack[4] * 10 + stack[5];
 
         set_AVRTime_time(&AVRAlarm, hours, mins, secs);
-        insert_time_set( AVR_HOUR(&AVRAlarm), AVR_MIN(&AVRAlarm) );
-
         AlarmSet = 0x01;
         break;
 
     case M_WEATHER_DISP: 
         /* Select forecast mode from first number entered */
         WeatherForecast = stack[0];
-        insert_weather_set(WeatherForecast);
         break;
 
     default: break;
 
     }
+
+    switch ( CurrDispMode ){
+
+        case M_TIME_DISP:
+            insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
+            break;
+
+        case M_ALARM_DISP:
+            insert_time_set( AVR_HOUR(&AVRAlarm), AVR_MIN(&AVRAlarm) );
+            break;
+
+        case M_DATE_DISP:
+            insert_day_set( get_AVRTime_dayofmonth(AVR_DAY(&AVRTime)) );
+            break;
+
+        case M_WEATHER_DISP:
+            insert_weather_set(WeatherForecast);
+            break;
+
+        default:break;
+    }
+
 }
 
 static void dispatch_command(uint8_t byte){
@@ -390,7 +403,7 @@ static void dispatch_command(uint8_t byte){
         /* Change clock to display date */
         case IR_DEF_BUY:
             CurrDispMode = M_DATE_DISP;
-            insert_date_set( AVR_DAY(&AVRTime), AVR_YEAR(&AVRTime) );
+            insert_day_set( get_AVRTime_dayofmonth(AVR_DAY(&AVRTime)) );
             break;
 
         /* Change clock to display weather */
@@ -521,6 +534,7 @@ void poll(void){
     //ACMP_ENABLE();
     FirstEdge = 1;
 }
+
 /* Software Interrupt 0 */
 ISR(SOFT_INT0_vect){
 #if 0
@@ -577,7 +591,7 @@ ISR(IR_INCOMING_INT){
 
         _delay_us(1600);
 
-        //INVERT_PIN(PIEZO_PORT,PIEZO_PIN);
+        INVERT_PIN(PIEZO_PORT,PIEZO_PIN);
     }
     
     if (prevbyte == byte) { /* Second Pulse*/
@@ -655,18 +669,48 @@ ISR(TIMER1_COMPA_vect){
         switch ( CurrDispMode ) {
 
             case M_TIME_DISP:
+
                 /* Update the LEDSet if a new minute has ticked over */
                 insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
                 break;
-            case M_DATE_DISP:
-                /* Update the LEDSet if a new day has ticked over */
-                insert_date_set( AVR_DAY(&AVRTime), AVR_YEAR(&AVRTime) );
-                break;
+
             case M_ALARM_DISP:
+
                 /* Update the LEDSet if a new minute has ticked over */
                 insert_time_set( AVR_HOUR(&AVRAlarm), AVR_MIN(&AVRAlarm) );
                 break;
+
+            default:break;
         }
+    }
+
+    if (CurrDispMode == M_DATE_DISP) {
+
+        switch( AVR_SEC(&AVRTime) % 12 ){
+
+            case 0:
+            case 1:
+            case 2:
+            case 3:
+                insert_day_set( get_AVRTime_dayofmonth(AVR_DAY(&AVRTime)) );
+                break;
+
+            case 4:
+            case 5:
+            case 6:
+            case 7:
+                insert_month_set( get_AVRTime_month(AVR_DAY(&AVRTime),
+                            AVR_YEAR(&AVRTime))  );
+                break;
+
+            case 8:
+            case 9:
+            case 10:
+            case 11:
+                insert_year_set( AVR_YEAR(&AVRTime) );
+                break;
+        }    
+
     }
  
     /* Compare the current time with the alarm time */ 
