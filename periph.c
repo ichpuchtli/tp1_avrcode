@@ -20,8 +20,6 @@ void init_comparator(void){
     // Fire Interrupt on Rising Edge
     ACSR = (0 << ACO) | (1 << ACIE) | (0 << ACIS1) | (0 << ACIS0);  
 
-    DIDR1 = (0 << AIN1D) | (0 << AIN0D);
-
 }
 
 void init_ADC(void){
@@ -44,6 +42,8 @@ void init_ADC(void){
     
     // Left adjust 10 bit ADC value just need to read ADCH 8-bit precision
     ADMUX = (0<<REFS1)|(1<<REFS0)|(1<<ADLAR);
+
+    // Select channel by default
     ADMUX |= 2;
 
     // ADC Prescaler Selections
@@ -74,9 +74,8 @@ void init_ADC(void){
     // Timer/Counter 0 prepared for 38Hz ADC polling
     ADCSRB = (0<<ADTS2)|(0<<ADTS1)|(0<<ADTS0);
 
-    // Disable all ADC
+    // Disable all ADC channels but channel 2
     DIDR0 = (1<<ADC5D)|(1<<ADC4D)|(1<<ADC3D)|(0<<ADC2D)|(1<<ADC1D)|(1<<ADC0D);
-
 }
 
 void trigger_ADC(uint8_t channel){
@@ -90,7 +89,6 @@ void trigger_ADC(uint8_t channel){
     ADCSRA |= (1<<ADSC);
 }
 
-// 8bit Timer used to trigger ADC conversions
 void init_timer0(void)
 {
     // Freq = F_CPU / prescaler / 255 
@@ -119,7 +117,6 @@ void init_timer0(void)
     
 }
 
-// 16bit Timer used to count seconds
 void init_timer1(void){
 
     // CS12 CS11 CS10  Description
@@ -153,7 +150,6 @@ void init_timer1(void){
     TIMSK1 = (0<<OCIE1B)|(1<<OCIE1A)|(0<<TOIE1);
 }
 
-// 8-bit timer used intercept IR Stream
 void init_timer2(void){
 
     // Freq = F_CPU / prescaler / 2 * OCR2A
@@ -181,4 +177,3 @@ void init_timer2(void){
     // Use OCR2A Compare match interrupt
     TIMSK2 = (0<<OCIE2B)|(1<<OCIE2A)|(0<<TOIE2);
 }
-

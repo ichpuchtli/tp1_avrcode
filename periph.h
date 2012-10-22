@@ -13,9 +13,6 @@ void init_timer0(void);
 // Triggers ISR(TIMER1_COMPA_vect) @ 1 Hz
 void init_timer1(void);
 
-// Setup 8-bit timer2 to be an IR Message Interceptor
-void start_IR_interceptor(void);
-
 // 8-bit timer
 void init_timer2(void);
 

@@ -21,8 +21,8 @@
 
 /* Initial starting time 9:30am,1st January, 2012 */
 #define AVR_DFL_YEAR 1991
-#define AVR_DFL_DAY  139 
-#define AVR_DFL_HOUR 13
+#define AVR_DFL_DAY  169 
+#define AVR_DFL_HOUR 0
 #define AVR_DFL_MIN  0 
 #define AVR_DFL_SEC  0
 
@@ -50,9 +50,6 @@ struct AVRTime_t {
     volatile uint16_t seconds;      // -32768 <=> 32768 % 60
 };
 
-/* Initialize an AVRTime_t struct */
-void init_AVRTime(struct AVRTime_t* stamp);
-
 /* Compare two AVRTime_t's 
  * Returns the difference e.g. a value less than zero is return if 
  * a - b < 0, 0 if a - b == 0 and a value greater than zero is returned
@@ -67,7 +64,7 @@ void set_AVRTime_time(struct AVRTime_t* stamp, uint8_t hours, uint8_t mins, uint
 void set_AVRTime_date(struct AVRTime_t* stamp, uint16_t years, uint16_t days);
 
 uint16_t get_AVRTime_day(uint8_t day_of_month, uint8_t month, uint16_t year);
+uint8_t get_AVRTime_dayofmonth(int16_t bulk_days);
 uint8_t get_AVRTime_month(int16_t bulk_day, uint16_t year); 
 
 int8_t check_AVRTime_date(uint8_t day_of_month, uint8_t month, uint16_t year);
-uint8_t get_AVRTime_dayofmonth(int16_t bulk_days);

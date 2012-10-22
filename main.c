@@ -32,35 +32,17 @@
 #define SOFT_INT1_PIN           0 /* (PCINT8) */
 #define SOFT_INT1_vect          PCINT1_vect
 
-/* PCIE2 => PCINT016..23 PORTD*/
-/* TODO Unable to use due to overlapping pin registrations */
-#if 0
-#define SOFT_INT2_PORT          PIND
-#define SOFT_INT2_PIN           5  /* (PCINT21) */
-#define SOFT_INT2_vect          PCINT2_vect
-#endif
-
 ///////////////////////////// ANALOG COMPARATOR ///////////////////////////////
 #define ACMP_PORT               ACSR
 #define ACMP_PIN                ACO 
 
 #define JIFFY_DIFF              8     /* mseconds period = 1000 / (F_CPU/256/OCR) */
 #define ACMP_FLASH_DELAY        80    /* mseconds flash period */
+#define ACMP_PULSE_WIDTH        (ACMP_FLASH_DELAY/JIFFY_DIFF) /* jiffies */
 
 #define ACMP_PKT_INBOUND        (!PROBE_PIN(ACSR,ACIE))
 #define ACMP_ENABLE()           SET_PIN_HIGH(ACSR,ACIE)
 #define ACMP_DISABLE()          SET_PIN_LOW(ACSR,ACIE)
-
-#if 0
-#define ACMP_PKT_INBOUND        (!Enabled)
-#define ACMP_ENABLE()           (Enabled = 0) 
-#define ACMP_DISABLE()          do {            \
-    if( Enabled ) { Enabled = 0;}  \
-    else {SET_PIN_HIGH(ACSR,ACI); return;} \
-}while(0)
-#endif
-
-#define ACMP_PULSE_WIDTH        (ACMP_FLASH_DELAY/JIFFY_DIFF) /* jiffies */
 
 ///////////////////////////// LIGHT SENSOR ////////////////////////////////////
 #define ADC_CHANNEL             2     /* PORTC2*/
@@ -116,24 +98,28 @@
 #define M_WEATH_RAINY           1
 #define M_WEATH_CLOUDY          2
 
-///////////////////////////// DEBUG PINS //////////////////////////////////////
-#define DEBUG0_PORT              PORTB
-#define DEBUG0_DDR               DDRB
-#define DEBUG0_PIN               5 
+///////////////////////////// DISPLAY MODES ///////////////////////////////////
+#define M_TIME_DISP             0
+#define M_DATE_DISP             1
+#define M_ALARM_DISP            2
+#define M_WEATHER_DISP          3
 
-#define DEBUG1_PORT              PORTB
-#define DEBUG1_DDR               DDRB
-#define DEBUG1_PIN               4 
+///////////////////////////// DEBUG PINS //////////////////////////////////////
+#define DEBUG0_PORT             PORTB
+#define DEBUG0_DDR              DDRB
+#define DEBUG0_PIN              5 
+
+#define DEBUG1_PORT             PORTB
+#define DEBUG1_DDR              DDRB
+#define DEBUG1_PIN              4 
 
 /* Invert the state of a pin low->high or high->low */
-#define INVERT_PIN(REG,PIN)    (REG ^= (1 << PIN))
+#define INVERT_PIN(REG,PIN)     (REG ^= (1 << PIN))
 /* Returns 1 or 0 if pin is High or Low */
-#define PROBE_PIN(REG,PIN)     (REG & (1 << PIN)) 
+#define PROBE_PIN(REG,PIN)      (REG & (1 << PIN)) 
 
-#define SET_PIN_HIGH(REG,PIN)  (REG |= (1 << PIN))
-#define SET_PIN_LOW(REG,PIN)   (REG &= ~(1 << PIN))
-
-enum DISPLAY_MODES { M_TIME_DISP, M_DATE_DISP, M_ALARM_DISP, M_WEATHER_DISP };
+#define SET_PIN_HIGH(REG,PIN)   (REG |= (1 << PIN))
+#define SET_PIN_LOW(REG,PIN)    (REG &= ~(1 << PIN))
 
 /* Initialize on board time */
 static struct AVRTime_t AVRTime = AVR_INIT_TIME(0,0,0);
@@ -151,8 +137,6 @@ static volatile int16_t Jiffies = 0x0000;
 static volatile int16_t NextPollEvent = 0x0000;
 
 static volatile uint8_t WeatherForecast = M_WEATH_SUNNY;
-
-static volatile uint8_t FirstEdge = 0x01;
 
 static void select_LED(uint8_t diode){
 
@@ -267,77 +251,126 @@ static void insert_month_set(uint8_t month){
     
     LEDSet[LEDSetSize++] = 26;
     LEDSet[LEDSetSize++] = (month % 12) + 1;
-    LEDSet[LEDSetSize++] = (month / 10) + 13;
 }
 
-static void insert_year_set(uint16_t year){
+static void insert_year_set_1(uint16_t year){
 
-    uint8_t start, end;    
+    uint8_t start;    
 
     LEDSetSize = 0;
 
     LEDSet[LEDSetSize++] = 27;
 
-    start = year / 1000 + 1;
-    end   = start + ( ( year / 100 ) % 10 );
+    start = year / 100;
 
-    for( uint8_t i = start; i <= end; i++)
-        LEDSet[LEDSetSize++] = i % 12;
-
-    start = (year % 100)/10;
-    end = start + year % 10;
-
-    for( uint8_t i = start; i <= end; i++) 
-        LEDSet[LEDSetSize++] = i % 12 + 12;
+    LEDSet[LEDSetSize++] = start / 10 + 13;
+    LEDSet[LEDSetSize++] = start % 10 + 1;
 }
 
+static void insert_year_set_2(uint16_t year){
 
+    uint8_t start;
+
+    LEDSetSize = 0;
+
+    LEDSet[LEDSetSize++] = 28;
+
+    start = year % 100;
+
+    LEDSet[LEDSetSize++] = start / 10 + 13;
+    LEDSet[LEDSetSize++] = start % 10 + 1;
+}
+
+void insert_date_set(void){
+       
+    uint16_t bulk_days = AVR_DAY(&AVRTime);
+    uint16_t year = AVR_YEAR(&AVRTime);
+    uint8_t month = get_AVRTime_month(bulk_days, year);
+    uint8_t dayofmonth = get_AVRTime_dayofmonth( bulk_days );
+
+    switch( AVR_SEC(&AVRTime) & 15 ){ 
+
+        case 0:
+        case 1:
+        case 2:
+        case 3:
+            insert_day_set( dayofmonth );
+            break;
+
+        case 4:
+        case 5:
+        case 6:
+        case 7:
+            insert_month_set( month );
+            break;
+
+        case 8:
+        case 9:
+        case 10:
+        case 11:
+            insert_year_set_1( year );
+            break;
+
+        case 12:
+        case 13:
+        case 14:
+        case 15:
+            insert_year_set_2( year );
+            break;
+
+    }
+
+}
 void process_num_stack(uint8_t* stack, uint8_t size){
 
     uint8_t hours, mins, secs;
-    uint16_t days, months, years;
+    uint16_t days, dayofmonth, months, years;
 
     /* Switch on the current display mode to update required structures */
     switch( CurrDispMode ){
 
-    case M_TIME_DISP:
-        /* Set Time */
-        hours = stack[0] * 10 + stack[1];
-        mins  = stack[2] * 10 + stack[3];
-        secs  = stack[4] * 10 + stack[5];
-    
-        set_AVRTime_time(&AVRTime, hours, mins, secs);
-        break;
+        case M_TIME_DISP:
 
-    case M_DATE_DISP:
-        /* Set Date */
-        days = stack[0] * 10 + stack[1];
-        months = stack[2] * 10 + stack[3];
-        years = stack[4] * 1000 + stack[5] * 100 + stack[6] * 10 + stack[7];
-
-        //if ( !check_AVRTime_date(days, months, years) ) break;
+            /* Set Time */
+            hours = stack[0] * 10 + stack[1];
+            mins  = stack[2] * 10 + stack[3];
+            secs  = stack[4] * 10 + stack[5];
         
-        days = get_AVRTime_day(days, months, years);
+            set_AVRTime_time(&AVRTime, hours, mins, secs);
+            break;
 
-        set_AVRTime_date(&AVRTime, days, years); 
-        break;
+        case M_DATE_DISP:
 
-    case M_ALARM_DISP:
-        /* Set Alarm Time */
-        hours = stack[0] * 10 + stack[1];
-        mins  = stack[2] * 10 + stack[3];
-        secs  = stack[4] * 10 + stack[5];
+            /* Set Date */
+            dayofmonth = stack[0] * 10 + stack[1];
+            months = stack[2] * 10 + stack[3];
+            years = stack[4] * 1000 + stack[5] * 100 + stack[6] * 10 + stack[7];
 
-        set_AVRTime_time(&AVRAlarm, hours, mins, secs);
-        AlarmSet = 0x01;
-        break;
+            if ( !check_AVRTime_date(dayofmonth, months, years) ) return;
+            
+            days = get_AVRTime_day(dayofmonth, months, years);
 
-    case M_WEATHER_DISP: 
-        /* Select forecast mode from first number entered */
-        WeatherForecast = stack[0];
-        break;
+            set_AVRTime_date(&AVRTime, years, days); 
+            set_AVRTime_date(&AVRAlarm, years, days);
+            break;
 
-    default: break;
+        case M_ALARM_DISP:
+
+            /* Set Alarm Time */
+            hours = stack[0] * 10 + stack[1];
+            mins  = stack[2] * 10 + stack[3];
+            secs  = stack[4] * 10 + stack[5];
+
+            set_AVRTime_time(&AVRAlarm, hours, mins, secs);
+            AlarmSet = 0x01;
+            break;
+
+        case M_WEATHER_DISP: 
+            /* Select forecast mode from first number entered */
+            WeatherForecast = stack[0];
+            break;
+
+        default: break;
 
     }
 
@@ -352,7 +385,7 @@ void process_num_stack(uint8_t* stack, uint8_t size){
             break;
 
         case M_DATE_DISP:
-            insert_day_set( get_AVRTime_dayofmonth(AVR_DAY(&AVRTime)) );
+            insert_date_set();
             break;
 
         case M_WEATHER_DISP:
@@ -477,14 +510,15 @@ int main(void) {
     init_ports();
 
     init_timer0(); /* Multiplexer */
-    init_timer1(); /* Seconds Timer/Counter */
-    init_timer2(); /* JiffyTicker */
 
     sei(); /* Enable interrupts */
 
     splash_screen();
 
     TCCR0B = (0<<CS02)|(1<<CS01)|(1<<CS00);
+
+    init_timer1(); /* Seconds Timer/Counter */
+    init_timer2(); /* JiffyTicker */
 
     init_ADC();
     init_comparator();
@@ -498,7 +532,8 @@ int main(void) {
     return 0;
 }
 
-void poll(void){
+
+void poll_ACO(void){
 
     /*
      * On first ACMP interrupt setup up jiffy delta to fire an interrupt to poll
@@ -531,47 +566,7 @@ void poll(void){
     byte = 0x00;
 
     /* Enable Analog Compare vector */
-    //ACMP_ENABLE();
-    FirstEdge = 1;
-}
-
-/* Software Interrupt 0 */
-ISR(SOFT_INT0_vect){
-#if 0
-    /*
-     * On first ACMP interrupt setup up jiffy delta to fire an interrupt to poll
-     * like IR. Screen flash frequency will have to be multiple of 8.
-     *
-     *            |-40m-|-40m-|-40m-|-40m-|
-     * ~~ -----+     +-----+           +---- ~~
-     * ~~      |     |     |           |     ~~
-     * ~~      |_____|     |___________|     ~~
-     *
-     *         ^ANALOG_COMP_vect
-     */
-
-    static uint8_t byte = 0x00;
-    static int8_t bits = 0x08;
-
-    bits--;
-
-    if( bits >= 0 ){
-
-        byte |= PROBE_PIN(ACMP_PORT,ACMP_PIN) << bits;
-
-        return;
-    }
-
-    /* Dispatch Command */
-    dispatch_command( byte );
-
-    bits = 0x08;
-    byte = 0x00;
-
-    /* Enable Analog Compare vector */
-    //ACMP_ENABLE();
-    FirstEdge = 1;
-#endif
+    ACMP_ENABLE();
 }
 
 /* ISR Triggered by IR_RECEIVER (PCINT8) || SOFT_INT1 */
@@ -611,16 +606,11 @@ ISR(IR_INCOMING_INT){
 /* Optical Comm Trigger */
 ISR(ANALOG_COMP_vect){ 
     
-    //INVERT_PIN(DEBUG0_PORT,DEBUG0_PIN);
-    
     _delay_ms(2);
 
-    /* Disable Analog Compare vectors */
-    //ACMP_DISABLE();
-
-    if( FirstEdge ){
+    if( !ACMP_PKT_INBOUND ){
         
-        FirstEdge = 0;
+        ACMP_DISABLE();
 
         /* Reset Jiffie Count */
         Jiffies = 0x0000;
@@ -664,55 +654,29 @@ ISR(TIMER1_COMPA_vect){
     /* Update the tick count */
     tick_AVRTime(&AVRTime);
 
-    if ( AVR_SEC(&AVRTime) == 0) {
+    if( AVR_SEC(&AVRTime) == 0) {
 
         switch ( CurrDispMode ) {
 
             case M_TIME_DISP:
 
-                /* Update the LEDSet if a new minute has ticked over */
                 insert_time_set( AVR_HOUR(&AVRTime), AVR_MIN(&AVRTime) );
                 break;
 
             case M_ALARM_DISP:
 
-                /* Update the LEDSet if a new minute has ticked over */
                 insert_time_set( AVR_HOUR(&AVRAlarm), AVR_MIN(&AVRAlarm) );
                 break;
-
+    
             default:break;
         }
-    }
-
-    if (CurrDispMode == M_DATE_DISP) {
-
-        switch( AVR_SEC(&AVRTime) % 12 ){
-
-            case 0:
-            case 1:
-            case 2:
-            case 3:
-                insert_day_set( get_AVRTime_dayofmonth(AVR_DAY(&AVRTime)) );
-                break;
-
-            case 4:
-            case 5:
-            case 6:
-            case 7:
-                insert_month_set( get_AVRTime_month(AVR_DAY(&AVRTime),
-                            AVR_YEAR(&AVRTime))  );
-                break;
-
-            case 8:
-            case 9:
-            case 10:
-            case 11:
-                insert_year_set( AVR_YEAR(&AVRTime) );
-                break;
-        }    
 
     }
- 
+
+    if( CurrDispMode ==  M_DATE_DISP){
+        insert_date_set();
+    }
+
     /* Compare the current time with the alarm time */ 
     if(AlarmSet && !comp_AVRTime(&AVRTime, &AVRAlarm)){
         AlarmOn = 8; /* Sound Alarm (Beep 4 Times) */
@@ -729,18 +693,12 @@ ISR(TIMER2_COMPA_vect){
 
     Jiffies++;
 
-    /* Cap at +16383 to prevent overflow during addition and subtraction.*/
-    //Jiffies &= ((1 << 14) - 1);
-
-    if( FirstEdge == 0 ) {
+    if( ACMP_PKT_INBOUND ) {
 
         /* New Poll Event, Time to POLL Analog Comparator */
         if( (NextPollEvent - Jiffies) <= 0){
 
-            /* Queue Software Interrupt 0, to handle polling */
-            //INVERT_PIN(SOFT_INT0_PORT, SOFT_INT0_PIN);
-
-            poll();
+            poll_ACO();
 
             /* Queue next poll event in one "pulse width" from now */
             NextPollEvent = Jiffies + ACMP_PULSE_WIDTH;
